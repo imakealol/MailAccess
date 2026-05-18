@@ -1,0 +1,90 @@
+# Contributing
+
+## Adding a Module
+
+Each OSINT module is a single `.py` file in `backend/modules/`. The auto-discovery registry (`backend/modules/__init__.py`) scans the package at import time — no manual wiring needed.
+
+### The five things every module must implement
+
+```python
+from backend.modules.base import BaseModule, ModuleResult, ModuleStatus
+
+class MyModule(BaseModule):
+    name = "my_module"         # 1. unique slug — used in API responses and DB records
+    description = "One line."  # 2. human-readable purpose (shown in GET /api/modules/)
+    requires_key = True        # 3. True if the module should skip when its API key is absent
+
+    async def run(self, email: str) -> ModuleResult:  # 4. async, takes the email string
+        ...
+        return ModuleResult(   # 5. always return ModuleResult — never raise
+            status=ModuleStatus.SUCCESS,   # SUCCESS | PARTIAL | FAILED | SKIPPED
+            findings=[                     # list of dicts — flexible schema per module
+                {
+                    "platform": "my_service",
+                    "url": "https://...",
+                    "metadata": {...},
+                    "confidence": "high",  # high | medium | low
+                }
+            ],
+            metadata={},   # module-level supplementary info (counts, API version, etc.)
+            errors=[],     # human-readable error strings
+        )
+```
+
+### Key constraints
+
+- **Never raise from `run()`.** Catch all exceptions and return `ModuleResult(status=ModuleStatus.FAILED, errors=[str(e)])`.
+- **Check for missing keys early.** If `requires_key = True`, check `settings.your_api_key` at the top of `run()` and return `ModuleStatus.SKIPPED` if absent.
+- **Use `build_client()`** from `backend.core.http_client` for all outbound HTTP — it respects proxy settings and the rate limiter.
+- The engine enforces `MODULE_TIMEOUT_SECONDS` (default 30 s) per module via `asyncio.wait_for`. Plan accordingly.
+- Do not call blocking libraries directly on the event loop — wrap them with `asyncio.to_thread()`.
+
+### File placement
+
+Drop the file at `backend/modules/my_module.py`. The next server start auto-registers it. Module `name` values must be unique across the package.
+
+---
+
+## Adding an Exporter
+
+Exporters live in `backend/exporters/`. Each inherits `BaseExporter`:
+
+```python
+from backend.exporters.base import BaseExporter
+
+class MyExporter(BaseExporter):
+    format_name = "myformat"              # matched against ?format= query param
+    content_type = "application/x-mine"  # MIME type returned in the HTTP response
+
+    def export(self, investigation_id: str, data: dict) -> bytes:
+        ...
+        return result_bytes
+```
+
+After writing the class, register it in `backend/exporters/__init__.py` — add it to the import list and to the `EXPORTERS` dict.
+
+The `data` argument is the enriched report dict produced by `enrich_report()` in `backend/core/service.py`. It contains: `id`, `email`, `status`, `exposure_score`, `risk_level`, `summary`, `findings`, `module_runs`, `findings_by_module`, `metadata_table`.
+
+PDF exports use an async `generate()` method instead of `export()`; see `PdfExporter` for the pattern.
+
+---
+
+## Code Style
+
+- Python 3.11+, `from __future__ import annotations` at the top of every file
+- Type annotations on all function signatures
+- `async`/`await` throughout — no blocking I/O on the event loop
+- No comments that describe *what* the code does — only comments explaining *why* when the reason is non-obvious
+- Line length: 100 characters
+- Formatter: `ruff format` (black-compatible)
+
+---
+
+## PR Checklist
+
+- [ ] Module or exporter follows the contracts above
+- [ ] `requires_key = True` modules return `SKIPPED` (not `FAILED`) when the key is absent
+- [ ] No blocking I/O executed directly on the asyncio event loop
+- [ ] No hardcoded credentials, tokens, or identifying user-agent strings
+- [ ] Existing tests pass (`pytest`)
+- [ ] PR description explains what data source is queried, what the findings look like, and why they are useful for OSINT

@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./cli:/app/cli
+      - ./data:/app/data
+    env_file: .env
+    environment:
+      - MAILACCESS_ENV=development
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    env_file: .env
+    command: npm run dev -- --host 0.0.0.0 --port 3000 --strictPort
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      # If POSTGRES_ENABLED=true is set in .env, it evaluates to "true" which we use as a profile.
+      # Users must set COMPOSE_PROFILES=true in .env or run with --profile true, 
+      # but standard Docker Compose also runs profiles that match active COMPOSE_PROFILES
+      - postgres
+    environment:
+      POSTGRES_DB: mailaccess
+      POSTGRES_USER: mailaccess
+      POSTGRES_PASSWORD: mailaccess
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
