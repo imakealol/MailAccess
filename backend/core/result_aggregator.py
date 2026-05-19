@@ -13,6 +13,8 @@ class UnifiedProfile:
     phones: list[str] = field(default_factory=list)
     emails: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
+    # Confirmed or probed accounts: breach-confirmed domains + social/discovery hits
+    accounts_found: list[dict] = field(default_factory=list)
 
 
 class ProfileAggregator:
@@ -39,6 +41,9 @@ class ProfileAggregator:
         {"location", "city", "country", "region", "address", "geo"}
     )
 
+    # Platforms whose findings are breach-event records, not account-presence signals
+    _BREACH_EVENT_PLATFORMS = frozenset({"HaveIBeenPwned"})
+
     def merge(self, findings: list[dict]) -> UnifiedProfile:
         """Extract and deduplicate identity fields from a list of findings."""
         names: set[str] = set()
@@ -47,12 +52,24 @@ class ProfileAggregator:
         phones: set[str] = set()
         emails: set[str] = set()
         locations: set[str] = set()
+        accounts: dict[str, dict] = {}  # keyed by platform for dedup
 
         for finding in findings:
             # DB-loaded findings wrap the payload under "data"; raw findings are flat
             payload: dict = finding.get("data", finding)
             if not isinstance(payload, dict):
                 continue
+
+            # Collect account-presence signals
+            platform = payload.get("platform")
+            if platform and platform not in self._BREACH_EVENT_PLATFORMS:
+                if platform not in accounts:
+                    accounts[platform] = {
+                        "platform": platform,
+                        "source": payload.get("source") or "probed",
+                        "confidence": payload.get("confidence"),
+                        "url": payload.get("profile_url") or payload.get("url"),
+                    }
 
             for key, value in payload.items():
                 if not isinstance(value, str) or not value.strip():
@@ -80,4 +97,5 @@ class ProfileAggregator:
             phones=sorted(phones),
             emails=sorted(emails),
             locations=sorted(locations),
+            accounts_found=sorted(accounts.values(), key=lambda a: a["platform"]),
         )

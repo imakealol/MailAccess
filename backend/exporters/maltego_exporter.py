@@ -42,7 +42,7 @@ def _finding_to_rows(
     seen_persons: set[str],
 ) -> list[list[Any]]:
     # Breach finding (haveibeenpwned)
-    if module_name == "haveibeenpwned" or "breach_name" in f_data:
+    if module_name in ("haveibeenpwned", "hibp") or "breach_name" in f_data:
         breach_name = f_data.get("breach_name", "Unknown")
         breach_date = f_data.get("breach_date", "")
         value = f"{breach_name} breach ({breach_date})" if breach_date else f"{breach_name} breach"

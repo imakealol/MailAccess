@@ -1,5 +1,7 @@
 # API Reference
 
+> The CLI (`pip install mailaccess`) wraps this API. All CLI commands call these endpoints.
+
 ## Base URL
 
 All REST endpoints are prefixed with `/api`. The WebSocket endpoint and Maltego transform server have no prefix.

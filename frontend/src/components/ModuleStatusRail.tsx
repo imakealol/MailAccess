@@ -26,6 +26,11 @@ const MODULE_META: Record<string, { label: string; icon: string }> = {
   apple:          { label: 'Apple',      icon: '' },
   linkedin:       { label: 'LinkedIn',   icon: 'in' },
   discord:        { label: 'Discord',    icon: '👾' },
+  account_discovery:      { label: 'AcctDisc', icon: '⊞' },
+  whatsmyname:            { label: 'WMN',      icon: '⊙' },
+  hudson_rock:            { label: 'HudsnRck', icon: '☠' },
+  permutation_discovery:  { label: 'Permute',  icon: '⇌' },
+  ghunt:                  { label: 'GHunt',    icon: '◉' },
 }
 
 interface DotProps {

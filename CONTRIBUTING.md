@@ -88,3 +88,11 @@ PDF exports use an async `generate()` method instead of `export()`; see `PdfExpo
 - [ ] No hardcoded credentials, tokens, or identifying user-agent strings
 - [ ] Existing tests pass (`pytest`)
 - [ ] PR description explains what data source is queried, what the findings look like, and why they are useful for OSINT
+
+---
+
+## Releasing a new version
+
+1. Bump version in `pyproject.toml`
+2. `python -m build`
+3. `twine upload dist/mailaccess-{version}*`

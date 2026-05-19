@@ -1,6 +1,6 @@
 # Module Reference
 
-Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
+MailAccess ships 11 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
 
 A module marked **key required** skips itself with `status: skipped` when its API key is absent — it does not cause the investigation to fail.
 
@@ -213,69 +213,211 @@ Detection methods vary by platform — some use public search APIs (GitHub), oth
 
 ---
 
-## `hunter_io`
+## `account_discovery`
 
-Verify email deliverability and retrieve associated domain information via the Hunter.io API.
-
-| | |
-|--|--|
-| **Requires key** | Yes — `HUNTER_IO_API_KEY` |
-| **Status** | Stub (returns empty success) |
-
----
-
-## `dns_lookup`
-
-Resolve MX, SPF, DMARC, and DKIM DNS records for the email's domain.
+Check account existence across 120+ platforms powered by [Holehe](https://github.com/megadose/holehe).
 
 | | |
 |--|--|
 | **Requires key** | No |
-| **Status** | Stub — use `domain_intel` for a fully implemented DNS check |
+| **Status** | Implemented |
+
+Platform coverage is dynamic — as Holehe adds new platforms upstream, this module picks them up automatically on the next install. See the [Holehe repository](https://github.com/megadose/holehe) for the current full platform list.
+
+Enable via `ENABLE_ACCOUNT_DISCOVERY=true` (opt-in — runs 120+ probes, expect 30–60 s per investigation).
+
+**Finding example (account confirmed):**
+```json
+{
+  "platform": "twitter",
+  "profile_url": "https://twitter.com",
+  "metadata": {
+    "email_recovery": "j***@gmail.com",
+    "high_value": true
+  },
+  "confidence": "high",
+  "source": "account_discovery"
+}
+```
+
+Findings with `email_recovery` or `phone_hint` in metadata are flagged `high_value: true` — these reveal partial contact details useful for cross-module correlation.
+
+**Module metadata:**
+```json
+{
+  "platforms_checked": 124,
+  "platforms_confirmed": 3,
+  "platforms_rate_limited": 2,
+  "platforms_not_found": 119,
+  "holehe_version": "1.61"
+}
+```
 
 ---
 
-## `whois_lookup`
+## `whatsmyname`
 
-Retrieve WHOIS registration data for the email's domain.
+Username enumeration across 700+ platforms via the [WhatsMyName](https://github.com/WebBreacher/WhatsMyName) dataset.
 
 | | |
 |--|--|
 | **Requires key** | No |
-| **Status** | Stub — use `domain_intel` for a fully implemented WHOIS check |
+| **Status** | Implemented |
+
+Opt-in (`ENABLE_WHATSMYNAME=true`) because the sweep fires one HTTP request per platform and takes 60–90 seconds. The dataset is fetched from GitHub on first run and cached locally at `data/cache/wmn-data.json` for 24 hours.
+
+**Finding example (account confirmed):**
+```json
+{
+  "platform": "HackerNews",
+  "profile_url": "https://news.ycombinator.com/user?id=janedoe",
+  "metadata": { "category": "tech" },
+  "confidence": "high"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "total_platforms_checked": 800,
+  "platforms_confirmed": 4,
+  "platforms_not_found": 705,
+  "platforms_errored": 3,
+  "wmn_version": "1.4.0"
+}
+```
 
 ---
 
-## `shodan`
+## `hudson_rock`
 
-Search Shodan for hosts and services associated with the email's domain.
-
-| | |
-|--|--|
-| **Requires key** | Yes — `SHODAN_API_KEY` |
-| **Status** | Stub — `domain_intel` performs Shodan lookup automatically when the key is set |
-
----
-
-## `social_links`
-
-Discover social media profiles plausibly linked to the email address by deriving a username from the local part.
+Check if the email address appears in infostealer credential logs via the Hudson Rock Cavalier API.
 
 | | |
 |--|--|
 | **Requires key** | No |
-| **Status** | Stub |
+| **Status** | Implemented |
+
+Always-on (no opt-in). The API is free and returns a 404 when the email is clean. Rate limits return `status: partial`.
+
+Returns one summary finding (infection counts, stealer families) and one finding per compromised domain credential.
+
+**Finding example (clean):** empty findings list, `status: success`.
+
+**Finding example (infected):**
+```json
+{
+  "platform": "hudson_rock",
+  "metadata": {
+    "total_infections": 2,
+    "stealer_families": ["RedLine", "Vidar"],
+    "first_seen": "2023-04-10",
+    "last_seen": "2024-01-22",
+    "exposed_corporate_services": 1,
+    "exposed_user_services": 4
+  },
+  "confidence": "high",
+  "severity": "critical"
+}
+```
+
+Per-domain findings (one per compromised service credential):
+```json
+{
+  "platform": "github.com",
+  "url": "https://github.com",
+  "metadata": {
+    "source": "infostealer_log",
+    "stealer_family": "RedLine",
+    "date_compromised": "2023-04-10",
+    "high_value": true
+  },
+  "confidence": "high"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "is_infostealer_victim": true,
+  "total_infections": 2,
+  "total_exposed_services": 5,
+  "all_compromised_domains": ["github.com", "..."]
+}
+```
 
 ---
 
-## `google_search`
+## `permutation_discovery`
 
-Perform Google search queries to surface public mentions of the email.
+Post-primary-phase orchestrator: if any upstream module recovered a real name (from Gravatar, HIBP breach data, GHunt, etc.), generates up to 60 email permutations and probes each with HIBP and Hudson Rock to find related accounts.
 
 | | |
 |--|--|
-| **Requires key** | No |
-| **Status** | Stub — use `google_dork` (with `SERPAPI_KEY`) for implemented search |
+| **Requires key** | No (HIBP key enables breach-check sub-probes) |
+| **Status** | Implemented |
+
+Opt-in (`ENABLE_PERMUTATION_DISCOVERY=true`) because it adds 30–60 seconds and up to 120 extra API calls. Skips automatically if no name was recovered. The original email address is never re-checked.
+
+**Finding example (match):**
+```json
+{
+  "platform": "permutation_match",
+  "metadata": {
+    "matched_email": "jane.doe@outlook.com",
+    "source_module": "hibp",
+    "match_type": "breach",
+    "breach_count": 2
+  },
+  "confidence": "medium"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "names_found": ["Jane Doe"],
+  "permutations_checked": 60,
+  "related_emails_found": true,
+  "matched_emails": ["jane.doe@outlook.com"]
+}
+```
+
+---
+
+## `ghunt`
+
+Extract deep Google account intelligence via [GHunt](https://github.com/mxrch/GHunt): GAIA ID, display name, profile photo, YouTube channel, public Drive files, Maps review history, and active Google services.
+
+| | |
+|--|--|
+| **Requires key** | Yes — `GHUNT_CREDS_PATH` (session credentials from `ghunt login`) |
+| **Status** | Implemented |
+
+Opt-in (`ENABLE_GHUNT=true`). Runs only against `@gmail.com`, `@googlemail.com`, and domains whose MX records route through Google (Google Workspace). All other domains are skipped immediately.
+
+Requires the `ghunt` extra: `pip install "mailaccess[ghunt]"` and a one-time `ghunt login`. See [docs/ghunt-setup.md](ghunt-setup.md).
+
+**Finding example:**
+```json
+{
+  "platform": "google_account",
+  "profile_url": "https://plus.google.com/123456789",
+  "metadata": {
+    "gaia_id": "123456789",
+    "display_name": "Jane Doe",
+    "account_creation_date": "2011-03-15",
+    "profile_photo_url": "https://lh3.googleusercontent.com/...",
+    "custom_profile_photo": true,
+    "youtube_channel_url": "https://www.youtube.com/channel/...",
+    "maps_reviews_count": 12,
+    "public_drive_files": 3,
+    "google_services_active": ["YouTube", "Maps", "Drive"],
+    "possible_location_hint": "London, Shoreditch"
+  },
+  "confidence": "high"
+}
+```
 
 ---
 

@@ -53,14 +53,15 @@ class HIBPModule(BaseModule):
                     
                     total_breaches = len(data)
                     all_data_classes = set()
+                    breach_domains: list[str] = []
                     dates = []
-                    
+
                     most_critical_name = None
                     highest_severity_val = -1
-                    
+
                     for breach in data:
                         name = breach.get("Name")
-                        domain = breach.get("Domain")
+                        domain = breach.get("Domain", "")
                         breach_date = breach.get("BreachDate")
                         description = breach.get("Description")
                         data_classes = breach.get("DataClasses", [])
@@ -70,10 +71,10 @@ class HIBPModule(BaseModule):
 
                         if breach_date:
                             dates.append(breach_date)
-                            
+
                         severity = "medium"
                         sev_val = 0
-                        
+
                         classes_lower = [c.lower() for c in data_classes]
                         if any("password" in c or "financial" in c for c in classes_lower):
                             severity = "critical"
@@ -81,14 +82,15 @@ class HIBPModule(BaseModule):
                         elif any("phone" in c or "address" in c for c in classes_lower):
                             severity = "high"
                             sev_val = 1
-                            
+
                         if sev_val > highest_severity_val or (sev_val == highest_severity_val and most_critical_name is None):
                             highest_severity_val = sev_val
                             most_critical_name = name
 
                         for c in data_classes:
                             all_data_classes.add(c)
-                            
+
+                        # Breach-event record (the actual breach entry)
                         findings.append({
                             "platform": "HaveIBeenPwned",
                             "url": f"https://haveibeenpwned.com/PwnedWebsites#{name}" if name else "https://haveibeenpwned.com",
@@ -101,17 +103,33 @@ class HIBPModule(BaseModule):
                                 "is_sensitive": is_sensitive,
                                 "is_verified": is_verified,
                                 "pwn_count": pwn_count,
-                                "severity": severity
+                                "severity": severity,
                             },
-                            "confidence": "high"
+                            "confidence": "high",
                         })
-                    
+
+                        # Per-domain confirmed-account finding
+                        if domain:
+                            breach_domains.append(domain)
+                            findings.append({
+                                "platform": domain,
+                                "url": f"https://{domain}",
+                                "metadata": {
+                                    "note": "Domain appeared in breach data — account confirmed",
+                                    "breach_name": name,
+                                    "breach_date": breach_date,
+                                    "severity": severity,
+                                },
+                                "confidence": "high",
+                                "source": "breach_confirmed",
+                            })
+
                     if dates:
                         dates.sort()
                         date_range = f"{dates[0]} to {dates[-1]}" if len(dates) > 1 else dates[0]
                     else:
                         date_range = None
-                        
+
                     return ModuleResult(
                         status=ModuleStatus.SUCCESS,
                         findings=findings,
@@ -119,8 +137,9 @@ class HIBPModule(BaseModule):
                             "total_breaches": total_breaches,
                             "breach_dates": date_range,
                             "most_critical_breach": most_critical_name,
-                            "all_data_classes": list(all_data_classes)
-                        }
+                            "all_data_classes": list(all_data_classes),
+                            "breach_domains": breach_domains,
+                        },
                     )
                 else:
                     return ModuleResult(

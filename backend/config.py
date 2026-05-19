@@ -24,6 +24,23 @@ class Settings(BaseSettings):
     # Worker
     max_concurrent_modules: int = 10
     module_timeout_seconds: int = 30
+    # Per-module timeout overrides: MODULE_TIMEOUT_OVERRIDES={"whatsmyname": 120}
+    module_timeout_overrides: dict[str, int] = {}
+
+    # Account discovery (opt-in — probes 120+ platforms via Holehe, can be noisy)
+    enable_account_discovery: bool = False
+
+    # WhatsMyName (opt-in — username enumeration across 700+ platforms, takes 60–90s)
+    enable_whatsmyname: bool = False
+
+    # Permutation discovery (opt-in — generates email variations from recovered names,
+    # then probes each with HIBP + Hudson Rock; adds 30–60s and up to 120 API calls)
+    enable_permutation_discovery: bool = False
+
+    # GHunt (opt-in — requires ghunt>=2.3 installed and a valid creds file from `ghunt login`)
+    # Cookies expire periodically and require manual refresh via `ghunt login`.
+    enable_ghunt: bool = False
+    ghunt_creds_path: str | None = None
 
     # Webhooks
     slack_webhook_url: str | None = None
@@ -55,6 +72,13 @@ class Settings(BaseSettings):
     @field_validator("rate_limit_overrides", mode="before")
     @classmethod
     def _parse_overrides(cls, v: str | dict) -> dict[str, int]:
+        if isinstance(v, str):
+            return json.loads(v) if v else {}
+        return v
+
+    @field_validator("module_timeout_overrides", mode="before")
+    @classmethod
+    def _parse_timeout_overrides(cls, v: str | dict) -> dict[str, int]:
         if isinstance(v, str):
             return json.loads(v) if v else {}
         return v

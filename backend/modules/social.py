@@ -43,10 +43,12 @@ class SocialModule(BaseModule):
             if isinstance(res, Exception):
                 errors.append(f"Social check exception: {str(res)}")
             elif isinstance(res, dict):
+                if res.get("rate_limited"):
+                    continue
+                if "findings" in res:
+                    findings.extend(res["findings"])
                 if "error" in res:
                     errors.append(res["error"])
-                elif "findings" in res:
-                    findings.extend(res["findings"])
 
         status = ModuleStatus.SUCCESS
         if errors:
@@ -385,15 +387,17 @@ class SocialModule(BaseModule):
                 "Content-Type": "application/x-www-form-urlencoded"
             }
             resp = await client.post(url, headers=headers, data={"email": email})
-            
-            if resp.status_code in (403, 429, 999):
-                return {"findings": [], "error": f"LinkedIn blocked request (HTTP {resp.status_code})"}
-                
+
+            if resp.status_code == 999:
+                return {"findings": [], "rate_limited": True}
+            if resp.status_code in (403, 429):
+                return {"findings": [], "rate_limited": True}
+
             text = resp.text.lower()
             unregistered_indicators = ["could not find", "don't recognize", "not recognized", "not associated", "invalid", "not found", "please try again"]
             if any(indicator in text for indicator in unregistered_indicators):
                 return {"findings": []}
-                
+
             if resp.status_code in (200, 302):
                 return {"findings": [{
                     "platform": "linkedin",
@@ -405,6 +409,8 @@ class SocialModule(BaseModule):
                     "confidence": "medium"
                 }]}
             return {"findings": []}
+        except httpx.TimeoutException:
+            return {"findings": [], "rate_limited": True}
         except Exception as e:
             err = repr(e) if not str(e) else str(e)
             return {"error": f"LinkedIn failed: {err}"}

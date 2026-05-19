@@ -40,6 +40,12 @@ async def lifespan(_app: FastAPI):
     
     await init_db()
     generate_mtz_bundle(_MTZ_PATH)
+    _slog = logging.getLogger("mailaccess.startup")
+    if settings.module_timeout_overrides:
+        _slog.info(
+            "MODULE_TIMEOUT_OVERRIDES applied: %s",
+            {k: f"{v}s" for k, v in settings.module_timeout_overrides.items()},
+        )
     yield
 
 

@@ -1,5 +1,16 @@
 # Integrations
 
+## CLI (`pip install mailaccess`)
+
+The fastest integration — install the CLI and point it at any MailAccess instance:
+
+```bash
+mailaccess config set-url http://your-instance:8000
+mailaccess investigate target@example.com -o report.stix
+```
+
+---
+
 ## Maltego
 
 MailAccess ships a Maltego local transform server that lets you run email investigations directly from the Maltego desktop app without touching the web UI or CLI.

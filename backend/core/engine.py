@@ -12,15 +12,19 @@ from ..modules import get_all_modules
 from ..modules.base import ModuleResult, ModuleStatus
 
 # Module categories for exposure scoring
+_INFOSTEALER_MODULES = frozenset({"hudson_rock"})
 _BREACH_MODULES = frozenset({"hibp"})
-_SOCIAL_MODULES = frozenset({"gravatar", "social_links", "google_search"})
+_SOCIAL_MODULES = frozenset({"gravatar", "social_links", "google_search", "ghunt", "whatsmyname", "account_discovery", "social"})
 
-_WEIGHT_BREACH = 15   # high: credential exposure
-_WEIGHT_SOCIAL = 5    # medium: identity surface
-_WEIGHT_META = 2      # low: infrastructure / info
+_WEIGHT_INFOSTEALER = 20  # critical: active malware compromise
+_WEIGHT_BREACH = 15       # high: credential exposure
+_WEIGHT_SOCIAL = 5        # medium: identity surface
+_WEIGHT_META = 2          # low: infrastructure / info
 
 
 def _module_weight(module_name: str) -> int:
+    if module_name in _INFOSTEALER_MODULES:
+        return _WEIGHT_INFOSTEALER
     if module_name in _BREACH_MODULES:
         return _WEIGHT_BREACH
     if module_name in _SOCIAL_MODULES:
@@ -91,16 +95,18 @@ class InvestigationEngine:
 
         async def _run_one(cls) -> None:
             mod = cls()
+            from ..config import settings
+            timeout = settings.module_timeout_overrides.get(mod.name, settings.module_timeout_seconds)
             async with semaphore:
                 await queue.put(QueueEvent(type="module_start", module_name=mod.name))
                 try:
                     result = await asyncio.wait_for(
-                        mod.run(email), timeout=self._timeout
+                        mod.run(email), timeout=timeout
                     )
                 except asyncio.TimeoutError:
                     result = ModuleResult(
                         status=ModuleStatus.FAILED,
-                        errors=[f"timed out after {self._timeout}s"],
+                        errors=[f"timed out after {timeout}s"],
                     )
                 except Exception as exc:
                     result = ModuleResult(
@@ -121,6 +127,29 @@ class InvestigationEngine:
                 *[_run_one(cls) for cls in classes],
                 return_exceptions=True,
             )
+
+            # Permutation discovery phase — runs after primary modules so it can
+            # read their findings to extract a real name.
+            from ..config import settings as _cfg
+            if _cfg.enable_permutation_discovery:
+                from ..modules.permutation_discovery import PermutationDiscovery
+                _perm = PermutationDiscovery()
+                await queue.put(QueueEvent(type="module_start", module_name=_perm.name))
+                try:
+                    _perm_result = await _perm.run(email, collected)
+                except Exception as _exc:
+                    _perm_result = ModuleResult(
+                        status=ModuleStatus.FAILED, errors=[str(_exc)]
+                    )
+                collected[_perm.name] = _perm_result
+                _evt = (
+                    "module_error"
+                    if _perm_result.status == ModuleStatus.FAILED
+                    else "module_result"
+                )
+                await queue.put(
+                    QueueEvent(type=_evt, module_name=_perm.name, result=_perm_result)
+                )
 
             # Persist before sentinel so consumers see the final score in the DB.
             self.status = InvestigationStatus.COMPLETE

@@ -1,5 +1,14 @@
 # Self-Hosting Guide
 
+## CLI-only install (no Docker needed)
+
+```bash
+pip install mailaccess
+mailaccess config set-url http://your-server:8000
+```
+
+---
+
 ## Requirements
 
 - Docker and Docker Compose v2 (for the container path)
@@ -64,6 +73,7 @@ Every setting is optional unless marked required.
 |----------|---------|-------------|
 | `MAX_CONCURRENT_MODULES` | `10` | Maximum number of modules that run in parallel per investigation |
 | `MODULE_TIMEOUT_SECONDS` | `30` | Per-module timeout; modules that exceed this are cancelled and marked `failed` |
+| `MODULE_TIMEOUT_OVERRIDES` | `{}` | Per-module timeout overrides as a JSON object (values in seconds). Example: `{"whatsmyname": 120, "account_discovery": 90}` |
 
 ### Rate Limiting
 
