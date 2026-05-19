@@ -34,6 +34,14 @@ class EmailRepModule(BaseModule):
                 errors=[f"EmailRep.io returned {res.status_code}: unrated or unknown email"],
             )
 
+        if res.status_code == 429:
+            return ModuleResult(
+                status=ModuleStatus.PARTIAL,
+                findings=[],
+                metadata={},
+                errors=["EmailRep rate-limited. Set EMAILREP_API_KEY for higher limits."],
+            )
+
         if res.status_code != 200:
             return ModuleResult(
                 status=ModuleStatus.FAILED,

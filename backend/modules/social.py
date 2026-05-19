@@ -104,9 +104,14 @@ class SocialModule(BaseModule):
             url = "https://www.spotify.com/api/account/forgot-password/"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             data = {"email": email}
-            resp = await client.post(url, headers=headers, data=data)
-            
-            text = resp.text.lower()
+            try:
+                resp = await client.post(url, headers=headers, data=data)
+                try:
+                    text = resp.text.lower()
+                except Exception:
+                    text = resp.content.decode("utf-8", errors="ignore").lower()
+            except Exception:
+                return {"findings": []}
             if "not found" not in text and "does not exist" not in text and "invalid email" not in text:
                 return {"findings": [{
                     "platform": "Spotify",
@@ -116,7 +121,7 @@ class SocialModule(BaseModule):
                 }]}
             return {"findings": []}
         except Exception as e:
-            return {"error": f"Spotify failed: {str(e)}"}
+            return {"error": f"Spotify failed: {repr(e)}"}
 
     async def _check_gravatar(self, client: httpx.AsyncClient, email: str, pre_data: dict | None) -> dict[str, Any]:
         try:
@@ -192,7 +197,7 @@ class SocialModule(BaseModule):
                             "metadata": {"note": "Account exists"},
                             "confidence": "medium"
                         }]}
-            elif resp.status_code == 404:
+            elif resp.status_code in (400, 404):
                 return {"findings": []}
             else:
                 return {"error": f"Adobe HTTP {resp.status_code}"}
@@ -246,7 +251,10 @@ class SocialModule(BaseModule):
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
             data = {"data": {"type": "user", "attributes": {"email": email, "password": "invalid_password_123"}}}
             resp = await client.post(url, headers=headers, json=data)
-            
+
+            if resp.status_code in (403, 429, 503):
+                return {"findings": []}  # blocked request is not a signal
+
             text = resp.text.lower()
             if "not found" not in text and "does not exist" not in text and "invalid email" not in text:
                 return {"findings": [{
@@ -398,7 +406,8 @@ class SocialModule(BaseModule):
                 }]}
             return {"findings": []}
         except Exception as e:
-            return {"error": f"LinkedIn failed: {str(e)}"}
+            err = repr(e) if not str(e) else str(e)
+            return {"error": f"LinkedIn failed: {err}"}
 
     async def _check_discord(self, client: httpx.AsyncClient, email: str) -> dict[str, Any]:
         try:

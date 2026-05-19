@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...core.service import InvestigationService, enrich_report
@@ -25,7 +25,7 @@ async def _cleanup_queue(investigation_id: str, delay: float = 300.0) -> None:
 
 
 class InvestigateRequest(BaseModel):
-    email: EmailStr
+    email: str
     modules: list[str] | None = None
 
 

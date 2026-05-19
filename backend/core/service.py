@@ -27,10 +27,12 @@ def _risk_level(score: int | None) -> str:
 def _build_summary(data: dict) -> str:
     runs = data.get("module_runs", [])
     findings = data.get("findings", [])
+    total = len(runs)
     success = sum(1 for r in runs if r["status"] == "success")
+    partial = sum(1 for r in runs if r["status"] == "partial")
     failed = sum(1 for r in runs if r["status"] == "failed")
-    detail = f"{success} successful" + (f", {failed} failed" if failed else "")
-    return f"Ran {len(runs)} modules ({detail}). Found {len(findings)} data points."
+    skipped = sum(1 for r in runs if r["status"] == "skipped")
+    return f"Ran {total} modules ({success} success, {partial} partial, {failed} failed, {skipped} skipped). Found {len(findings)} data points."
 
 
 def enrich_report(data: dict) -> dict:

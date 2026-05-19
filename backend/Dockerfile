@@ -12,6 +12,12 @@ COPY pyproject.toml README.md ./
 COPY backend/ ./backend/
 COPY cli/ ./cli/
 
+# WeasyPrint runtime libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgobject-2.0-0 libcairo2 libpango-1.0-0 libpangocairo-1.0-0 \
+    libgdk-pixbuf-xlib-2.0-0 libffi-dev shared-mime-info \
+ && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies (using --no-cache-dir to reduce image size)
 RUN pip install --no-cache-dir .
 
