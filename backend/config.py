@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Application
     debug: bool = False
     log_level: str = "INFO"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
     # Worker
     max_concurrent_modules: int = 10
@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     hunter_io_api_key: str | None = None
     emailrep_api_key: str | None = None
     shodan_api_key: str | None = None
-    virustotal_api_key: str | None = None
-    fullcontact_api_key: str | None = None
-    clearbit_api_key: str | None = None
     serpapi_key: str | None = None
 
     # Proxy

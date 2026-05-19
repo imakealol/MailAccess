@@ -29,8 +29,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     ):
         path = request.url.path
         
-        # Bypass authentication for /health and websocket routes
-        if path.startswith("/health") or path.startswith("/ws/"):
+        # Bypass authentication for /health, websocket, and Maltego transform routes
+        if path.startswith("/health") or path.startswith("/ws/") or path.startswith("/maltego/"):
             return await call_next(request)
 
         # If API key is not configured, bypass authentication entirely

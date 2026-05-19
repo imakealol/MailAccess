@@ -77,6 +77,15 @@ async def start_investigation(
     )
 
 
+@router.get("/report/{investigation_id}")
+async def get_report(
+    investigation_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the full enriched investigation report."""
+    service = InvestigationService(session)
+    data = await service.get_investigation(investigation_id)
+
     if data is None:
         raise HTTPException(status_code=404, detail="Investigation not found")
 
@@ -90,11 +99,6 @@ async def export_report(
     session: AsyncSession = Depends(get_db),
 ) -> Response:
     """Export the investigation report in the requested format."""
-    if format not in ("json", "csv", "markdown", "pdf", "stix", "maltego"):
-        raise HTTPException(
-            status_code=501,
-            detail=f"{format!r} export is not yet implemented",
-        )
 
     service = InvestigationService(session)
     data = await service.get_investigation(investigation_id)

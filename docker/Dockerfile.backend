@@ -2,9 +2,9 @@ FROM python:3.12-slim AS base
 
 WORKDIR /app
 
-# Install dependencies first for layer caching
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
+# Install dependencies first for layer caching (README.md required by hatchling metadata)
+COPY pyproject.toml README.md ./
+RUN pip install --no-cache-dir .
 
 # Copy source
 COPY backend/ ./backend/

@@ -1,4 +1,8 @@
-# MailAccess
+<p align="center">
+  <img src="frontend/public/ma_logo.png" width="120" alt="MailAccess Logo" />
+</p>
+
+<h1 align="center">MailAccess</h1>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
@@ -41,7 +45,6 @@ Open **http://localhost:3000** in your browser.
 | `google_dork` | Google dork queries via SerpAPI — LinkedIn, GitHub, Pastebin, open web | Yes — `SERPAPI_KEY` |
 | `domain_intel` | WHOIS, SPF / DMARC / MX, website presence, Shodan subdomains | No (Shodan optional) |
 | `social` | Account existence on 13 platforms (GitHub, Discord, Spotify, Skype, and more) | No |
-| `hunter_io` | Email deliverability and domain info via Hunter.io | Yes — `HUNTER_IO_API_KEY` |
 | `dns_lookup` | MX, SPF, DMARC, DKIM DNS records | No |
 | `whois_lookup` | WHOIS registration data | No |
 | `shodan` | Hosts and open services for the email's domain | Yes — `SHODAN_API_KEY` |

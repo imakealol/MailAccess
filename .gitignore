@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+.next/
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime data
+*.db
+data/
+maltego/*.mtz
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets (never commit)
+.env
+.env.local
+.env.*.local
+
+# Test artifacts
+test_*.py
+verify_*.py
+.pytest_cache/
+coverage/
+.coverage
+
+# Documentation
+!.env.example

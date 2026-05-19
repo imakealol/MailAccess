@@ -13,14 +13,7 @@ export default function NavBar() {
   return (
     <header className="border-b border-zinc-800 bg-zinc-900/60 px-5 py-3 flex items-center gap-4 flex-shrink-0 font-mono">
       <Link to="/" className="flex items-center gap-2 group">
-        <svg width="14" height="14" viewBox="0 0 28 28" fill="none" className="opacity-50 group-hover:opacity-100 transition-opacity">
-          <polygon
-            points="14,2 26,8 26,20 14,26 2,20 2,8"
-            stroke="#22d3ee"
-            strokeWidth="1.5"
-            fill="rgba(34,211,238,0.06)"
-          />
-        </svg>
+        <img src="/ma_logo.png" className="h-7 w-7 object-contain" alt="MailAccess Logo" />
         <span className="text-zinc-500 group-hover:text-zinc-200 text-sm transition-colors">
           MailAccess
         </span>
