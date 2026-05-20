@@ -16,11 +16,11 @@ router = APIRouter()
 def _risk_level(score: int | None) -> str:
     if score is None:
         return "unknown"
-    if score <= 20:
+    if score <= 15:
         return "low"
-    if score <= 50:
+    if score <= 35:
         return "medium"
-    if score <= 80:
+    if score <= 65:
         return "high"
     return "critical"
 

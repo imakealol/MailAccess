@@ -32,6 +32,31 @@ _WEIGHT_BREACH = 15       # high: credential exposure
 _WEIGHT_SOCIAL = 5        # medium: identity surface
 _WEIGHT_META = 2          # low: infrastructure / info
 
+# Confidence multipliers applied per finding before summing.
+# Low-confidence findings (search-result WMN hits, experimental hints) contribute
+# fractionally so volume alone can't inflate the score.
+_CONFIDENCE_MULTIPLIER: dict[str, float] = {
+    "high":   1.0,
+    "medium": 0.5,
+    "low":    0.2,
+    "none":   0.0,
+}
+
+# Per-module score caps prevent a single module with many hits (e.g. WMN matching
+# a common first-name username across 700 sites) from dominating the total.
+# Breach/infostealer modules have higher caps because each hit is genuinely alarming.
+_MODULE_CAP: dict[str, int] = {
+    "whatsmyname":      20,
+    "account_discovery": 15,
+    "user_scanner":     15,
+    "username_pivot":   10,
+    "social":           10,
+    "social_links":      5,
+    "hudson_rock":      40,
+    "hibp":             45,
+    "breachdirectory":  40,
+}
+
 
 def _module_weight(module_name: str) -> int:
     if module_name in _INFOSTEALER_MODULES:
@@ -68,13 +93,37 @@ def _sort_collected(results: dict[str, ModuleResult]) -> dict[str, ModuleResult]
 
 
 def _compute_exposure_score(results: dict[str, ModuleResult]) -> int:
-    """Sum weighted finding counts across all successful modules, clamped to [0, 100]."""
-    total = 0
+    """
+    Confidence-weighted, per-module-capped exposure score, clamped to [0, 100].
+
+    Each finding contributes: base_weight × confidence_multiplier.
+    The sum per module is then capped to prevent high-volume enumeration modules
+    (WMN, account_discovery) from drowning out genuine breach/infostealer signals.
+    """
+    total: float = 0.0
+    base_weight = _module_weight  # local alias
+
     for name in sorted(results.keys()):
         result = results[name]
-        if result.status in (ModuleStatus.SUCCESS, ModuleStatus.PARTIAL):
-            total += len(result.findings) * _module_weight(name)
-    return min(total, 100)
+        if result.status not in (ModuleStatus.SUCCESS, ModuleStatus.PARTIAL):
+            continue
+
+        weight = base_weight(name)
+        module_score: float = 0.0
+        for finding in result.findings:
+            confidence = "high"
+            if isinstance(finding, dict):
+                confidence = finding.get("confidence", "high")
+            multiplier = _CONFIDENCE_MULTIPLIER.get(confidence, 1.0)
+            module_score += weight * multiplier
+
+        cap = _MODULE_CAP.get(name)
+        if cap is not None:
+            module_score = min(module_score, cap)
+
+        total += module_score
+
+    return min(int(total), 100)
 
 
 @dataclass
@@ -275,7 +324,14 @@ class InvestigationEngine:
                             if _msg_extra.findings:
                                 prev = collected.get(_msg.name)
                                 if prev and hasattr(prev, "findings"):
-                                    prev.findings = list(prev.findings) + _msg_extra.findings
+                                    existing_urls = {
+                                        f.get("profile_url") for f in prev.findings
+                                    }
+                                    new_only = [
+                                        f for f in _msg_extra.findings
+                                        if f.get("profile_url") not in existing_urls
+                                    ]
+                                    prev.findings = list(prev.findings) + new_only
                                     if prev.metadata and _msg_extra.metadata:
                                         prev.metadata["whatsapp_followup"] = True
                                 else:

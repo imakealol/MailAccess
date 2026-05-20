@@ -163,13 +163,14 @@ async def list_investigations(
     )
 
 
-@router.delete("/investigation/{investigation_id}", status_code=204)
+@router.delete("/investigation/{investigation_id}", status_code=204, response_class=Response)
 async def delete_investigation(
     investigation_id: str,
     session: AsyncSession = Depends(get_db),
-) -> None:
+) -> Response:
     """Hard-delete an investigation and all associated findings."""
     service = InvestigationService(session)
     deleted = await service.delete_investigation(investigation_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Investigation not found")
+    return Response(status_code=204)

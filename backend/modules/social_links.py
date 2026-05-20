@@ -8,9 +8,8 @@ class SocialLinksModule(BaseModule):
 
     async def run(self, email: str) -> ModuleResult:
         username = email.split("@")[0]
-        # TODO: probe common social platforms for username existence
-        # Platforms: GitHub, Twitter/X, LinkedIn, Reddit, Instagram, etc.
         return ModuleResult(
-            status=ModuleStatus.SUCCESS,
+            status=ModuleStatus.SKIPPED,
             metadata={"derived_username": username},
+            errors=["Not yet implemented — account_discovery and whatsmyname cover this"],
         )

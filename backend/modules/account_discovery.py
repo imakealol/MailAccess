@@ -150,7 +150,10 @@ class AccountDiscoveryModule(BaseModule):
         hard_errors = [e for e in errors if not e.startswith("Rate-limited")]
         status = ModuleStatus.SUCCESS
         if hard_errors:
-            status = ModuleStatus.PARTIAL if findings else ModuleStatus.FAILED
+            # If at least some probes returned a definitive "not registered" result,
+            # the module ran meaningfully — report PARTIAL rather than FAILED.
+            had_results = bool(findings) or not_found_count > 0
+            status = ModuleStatus.PARTIAL if had_results else ModuleStatus.FAILED
 
         result = ModuleResult(
             status=status,

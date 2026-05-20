@@ -134,7 +134,7 @@ class UsernamePivotModule(BaseModule):
                 results = await asyncio.gather(*tasks)
                 checked += len(sites)
 
-                for entry, (outcome, profile_url) in zip(sites, results):
+                for entry, (outcome, profile_url, is_search) in zip(sites, results):
                     platform = entry.get("name", "")
                     if outcome != "found" or not platform:
                         continue
@@ -149,8 +149,9 @@ class UsernamePivotModule(BaseModule):
                             "matched_username": username,
                             "category": entry.get("category", ""),
                             "source": "username_pivot",
+                            **({"search_result": True} if is_search else {}),
                         },
-                        "confidence": "medium",
+                        "confidence": "low" if is_search else "medium",
                     })
 
         status = ModuleStatus.SUCCESS

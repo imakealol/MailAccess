@@ -42,7 +42,7 @@ BANNER = """\
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝╚══════╝
 [/bold red]
 [dim]Open-source OSINT email intelligence tool[/dim]
-[dim]v0.3.2 · pypi.org/project/mailaccess[/dim]"""
+[dim]v0.3.3 · pypi.org/project/mailaccess[/dim]"""
 
 app = typer.Typer(name="mailaccess", help="MailAccess OSINT email intelligence CLI.")
 console = Console()
@@ -300,11 +300,11 @@ def _display_url(value: str, max_len: int = 50) -> str:
 def _score_color(score: int | None) -> str:
     if score is None:
         return "white"
-    if score < 30:
+    if score <= 15:
         return "green"
-    if score < 60:
+    if score <= 35:
         return "yellow"
-    if score < 80:
+    if score <= 65:
         return "dark_orange"
     return "red"
 

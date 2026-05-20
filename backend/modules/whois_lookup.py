@@ -8,8 +8,8 @@ class WhoisLookupModule(BaseModule):
 
     async def run(self, email: str) -> ModuleResult:
         domain = email.split("@")[-1]
-        # TODO: implement using python-whois (run in executor to avoid blocking)
         return ModuleResult(
-            status=ModuleStatus.SUCCESS,
+            status=ModuleStatus.SKIPPED,
             metadata={"domain": domain},
+            errors=["Not yet implemented — WHOIS data is available via domain_intel for custom domains"],
         )

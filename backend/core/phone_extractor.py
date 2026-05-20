@@ -38,6 +38,9 @@ def normalize_e164(raw: str) -> str | None:
     cleaned = raw.strip()
     if not cleaned:
         return None
+    # Reject masked values (e.g. +1628***9574) — stripping * would produce garbage digits.
+    if "*" in cleaned:
+        return None
     has_plus = cleaned.startswith("+")
     digits = re.sub(r"\D", "", cleaned)
     if len(digits) < 7 or len(digits) > 15:

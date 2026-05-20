@@ -3,14 +3,13 @@ from .base import BaseModule, ModuleResult, ModuleStatus
 
 class DnsLookupModule(BaseModule):
     name = "dns_lookup"
-    description = "Resolve MX, SPF, DMARC, and DKIM DNS records for the email's domain."
+    description = "Resolve MX, SPF, DMARC, and DKIM DNS records for the email's domain. (domain_intel covers custom domains; this module handles free providers.)"
     requires_key = False
 
     async def run(self, email: str) -> ModuleResult:
         domain = email.split("@")[-1]
-        # TODO: implement using dnspython (dns.asyncresolver)
-        # Record types to query: MX, TXT (_spf, _dmarc), A/AAAA
         return ModuleResult(
-            status=ModuleStatus.SUCCESS,
+            status=ModuleStatus.SKIPPED,
             metadata={"domain": domain},
+            errors=["Not yet implemented — DNS data is available via domain_intel for custom domains"],
         )
