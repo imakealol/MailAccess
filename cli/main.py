@@ -4,8 +4,16 @@ import asyncio
 import contextlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
+
+# Force UTF-8 on stdout/stderr so Rich glyphs (✓, box-drawing, etc.) don't
+# crash on legacy Windows code pages (cp1252).
+if sys.platform == "win32":
+    with contextlib.suppress(Exception):
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
 import httpx
 import typer
@@ -30,7 +38,7 @@ BANNER = """\
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝╚══════╝
 [/bold red]
 [dim]Open-source OSINT email intelligence tool[/dim]
-[dim]v0.2.0 · pypi.org/project/mailaccess[/dim]"""
+[dim]v0.3.1 · pypi.org/project/mailaccess[/dim]"""
 
 app = typer.Typer(name="mailaccess", help="MailAccess OSINT email intelligence CLI.")
 console = Console()
@@ -108,8 +116,15 @@ def set_backend_url(url: str) -> None:
         json.dump(data, f, indent=2)
 
 
-config_app = typer.Typer(name="config", help="Manage configuration")
+config_app = typer.Typer(name="config", help="Manage configuration", invoke_without_command=True, no_args_is_help=True)
 app.add_typer(config_app)
+
+
+@config_app.callback(invoke_without_command=True)
+def config_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @config_app.command(name="set-url")
@@ -123,8 +138,15 @@ def config_set_url(
 
 # ── Keys ──────────────────────────────────────────────────────────────────────
 
-keys_app = typer.Typer(name="keys", help="Manage API keys stored in ~/.mailaccess/.env")
+keys_app = typer.Typer(name="keys", help="Manage API keys stored in ~/.mailaccess/.env", invoke_without_command=True, no_args_is_help=True)
 app.add_typer(keys_app)
+
+
+@keys_app.callback(invoke_without_command=True)
+def keys_callback(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @keys_app.command(name="list")
