@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_DB = Path.home() / ".mailaccess" / "mailaccess.db"
 
 
 class Settings(BaseSettings):
@@ -14,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///./data/mailaccess.db"
+    database_url: str = f"sqlite+aiosqlite:///{_DEFAULT_DB}"
 
     # Application
     debug: bool = False

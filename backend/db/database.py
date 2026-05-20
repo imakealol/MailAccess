@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -10,6 +12,13 @@ from .models import Base
 
 engine = create_async_engine(settings.database_url, echo=settings.debug)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def _ensure_db_dir() -> None:
+    """Create parent directory for SQLite databases if it doesn't exist."""
+    m = re.search(r"sqlite(?:\+\w+)?:///(.+)", settings.database_url)
+    if m:
+        Path(m.group(1)).parent.mkdir(parents=True, exist_ok=True)
 
 
 def _migrate_add_graph_data(sync_conn) -> None:
@@ -26,6 +35,7 @@ def _migrate_add_graph_data(sync_conn) -> None:
 
 async def init_db() -> None:
     """Create all tables if they don't exist. Called once at app startup."""
+    _ensure_db_dir()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_add_graph_data)
