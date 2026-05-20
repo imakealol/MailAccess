@@ -96,3 +96,52 @@ def verify(body: bytes, secret: str, header: str) -> bool:
 ```
 
 The webhook payload is the same JSON structure as `GET /api/report/{id}`.
+
+---
+
+## Pipeline Integration
+
+MailAccess is pipeline-friendly: read target emails from stdin, stream JSONL output, and branch on exit codes in CI/CD scripts.
+
+### stdin batch
+
+```bash
+cat emails.txt | mailaccess investigate -
+```
+
+Pass `-` as the email argument to read one email address per line from stdin. Each email is investigated sequentially; output is written to stdout in the configured format.
+
+### JSONL streaming
+
+```bash
+# Stream all findings as newline-delimited JSON
+mailaccess investigate you@example.com --format jsonl
+
+# Filter to critical findings only
+mailaccess investigate you@example.com --format jsonl | jq 'select(.severity=="critical")'
+
+# Combine with stdin batch
+cat targets.txt | mailaccess investigate - --format jsonl | jq 'select(.severity=="critical")'
+```
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Clean — no findings |
+| `1` | Findings present |
+| `2` | Active breaches detected |
+| `3` | Error (network, config, or API failure) |
+
+### Example: GitHub Actions step
+
+```yaml
+- name: Check email exposure
+  run: |
+    pip install mailaccess
+    mailaccess investigate ${{ secrets.TARGET_EMAIL }} --format jsonl > findings.jsonl
+    if [ $? -eq 2 ]; then
+      echo "::error::Active breaches detected"
+      exit 1
+    fi
+```

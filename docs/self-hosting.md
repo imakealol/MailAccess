@@ -4,7 +4,15 @@
 
 ```bash
 pip install mailaccess
-mailaccess config set-url http://your-server:8000
+
+# Option A: auto-start (simplest)
+mailaccess investigate you@example.com
+# Server starts automatically, runs investigation,
+# stops when done.
+
+# Option B: keep server running
+mailaccess serve  # in one terminal
+mailaccess investigate you@example.com  # in another
 ```
 
 ---
@@ -74,6 +82,8 @@ Every setting is optional unless marked required.
 | `MAX_CONCURRENT_MODULES` | `10` | Maximum number of modules that run in parallel per investigation |
 | `MODULE_TIMEOUT_SECONDS` | `30` | Per-module timeout; modules that exceed this are cancelled and marked `failed` |
 | `MODULE_TIMEOUT_OVERRIDES` | `{}` | Per-module timeout overrides as a JSON object (values in seconds). Example: `{"whatsmyname": 120, "account_discovery": 90}` |
+| `ENABLE_INVESTIGATION_CACHE` | `true` | Cache complete investigation results; repeated queries within the window return instantly |
+| `INVESTIGATION_CACHE_WINDOW_MINUTES` | `30` | How long a cached result is considered fresh (minutes) |
 
 ### Rate Limiting
 
@@ -114,6 +124,50 @@ All API keys are optional. Modules that require a missing key skip themselves wi
 | `VIRUSTOTAL_API_KEY` | Reserved for future module | https://virustotal.com |
 | `FULLCONTACT_API_KEY` | Reserved for future module | https://fullcontact.com |
 | `CLEARBIT_API_KEY` | Reserved for future module | https://clearbit.com |
+
+---
+
+## Module Timeout Overrides
+
+`whatsmyname` and `account_discovery` perform hundreds of HTTP requests per investigation and routinely exceed the default 30-second timeout. Set longer values in `MODULE_TIMEOUT_OVERRIDES` to prevent them from being cancelled early:
+
+```
+MODULE_TIMEOUT_OVERRIDES={"whatsmyname": 120, "account_discovery": 90, "username_pivot": 180}
+```
+
+Recommended values by connection quality:
+
+| Module | Fast connection | Slow connection |
+|--------|----------------|-----------------|
+| `whatsmyname` | `120` | `240` |
+| `account_discovery` | `90` | `180` |
+| `username_pivot` | `180` | `360` |
+| `user_scanner` | `180` | `300` |
+
+Modules that hit their timeout return `status: partial` with whatever findings were collected up to that point.
+
+---
+
+## Investigation Cache
+
+When `ENABLE_INVESTIGATION_CACHE=true` (the default), a completed investigation result is cached for `INVESTIGATION_CACHE_WINDOW_MINUTES` minutes. Submitting the same email within that window returns the cached result immediately (`cached: true` in the response) without running the modules again.
+
+To force a fresh run even when a cached result exists:
+
+```bash
+# CLI
+mailaccess investigate you@example.com --force
+
+# API
+POST /api/investigate
+{ "email": "you@example.com", "force": true }
+```
+
+To disable caching entirely:
+
+```
+ENABLE_INVESTIGATION_CACHE=false
+```
 
 ---
 

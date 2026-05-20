@@ -112,6 +112,6 @@ Use `|` in `success_string` or `failure_string` for multiple alternative substri
 
 ## Releasing a new version
 
-1. Bump version in `pyproject.toml`
+1. Bump version in `pyproject.toml` — the CLI reads this dynamically, no other files need updating.
 2. `python -m build`
 3. `twine upload dist/mailaccess-{version}*`

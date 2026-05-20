@@ -1,6 +1,6 @@
 # Module Reference
 
-MailAccess ships 11 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
+MailAccess ships 20 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
 
 A module marked **key required** skips itself with `status: skipped` when its API key is absent — it does not cause the investigation to fail.
 
@@ -179,6 +179,68 @@ Runs four checks concurrently: WHOIS, DNS, website HTTP fetch, and (if a Shodan 
 
 ---
 
+## `dns_lookup`
+
+Real DNS resolution for the email's domain: MX, SPF, DMARC, DKIM, A, and NS records. Always runs — no API key required and no opt-in flag.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+**Findings schema:**
+```json
+{
+  "platform": "dns_lookup",
+  "confidence": "high",
+  "metadata": {
+    "mx_records": ["aspmx.l.google.com"],
+    "mx_provider": "google",
+    "spf_record": "v=spf1 include:_spf.google.com ~all",
+    "dmarc_record": "v=DMARC1; p=reject; rua=mailto:dmarc@example.com",
+    "dkim_record": "v=DKIM1; k=rsa; p=...",
+    "has_spf": true,
+    "has_dmarc": true,
+    "has_dkim": true,
+    "a_records": ["93.184.216.34"],
+    "ns_records": ["ns1.example.com"]
+  }
+}
+```
+
+---
+
+## `whois_lookup`
+
+Full WHOIS registration data for the email's domain. Skips free email providers (Gmail, Outlook, ProtonMail, etc.) and detects privacy-shield registrations.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+**Findings schema:**
+```json
+{
+  "platform": "whois_lookup",
+  "confidence": "high",
+  "metadata": {
+    "registrar": "Namecheap, Inc.",
+    "registered": "2015-03-12",
+    "expires": "2027-03-12",
+    "updated": "2024-01-05",
+    "name_servers": ["ns1.example.com"],
+    "privacy_protected": false,
+    "registrant_org": "Acme Corp",
+    "registrant_country": "US"
+  }
+}
+```
+
+When the domain uses a privacy shield, `privacy_protected` is `true` and registrant fields are omitted.
+
+---
+
 ## `social`
 
 Check account existence across 13 social and productivity platforms.
@@ -210,6 +272,28 @@ Detection methods vary by platform — some use public search APIs (GitHub), oth
 ```
 
 > LinkedIn, Snapchat, and several others aggressively block automated requests. These findings carry `medium` or `low` confidence and may be absent entirely when the platform changes its behavior.
+
+---
+
+## `social_links`
+
+Derives username variations from the target email (local part, display names from prior findings) and feeds them into `username_pivot`. Also probes links extracted from social profile bios and cross-references them across modules.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+Runs in the primary phase alongside other modules. Findings are username candidates — they are not independent confirmations but signals passed to `username_pivot` for validation.
+
+**Module metadata:**
+```json
+{
+  "usernames_derived": ["janedoe", "jane.doe", "jdoe"],
+  "source_modules": ["gravatar", "social"],
+  "links_extracted": 3
+}
+```
 
 ---
 
@@ -617,6 +701,37 @@ Enabled by default (`ENABLE_MESSAGING_HINTS=true`). Rate-limited to **3 Telegram
   "telegram_checks": 3,
   "whatsapp_checks": 0,
   "signal_checkable": false
+}
+```
+
+---
+
+## `identity_graph` (built-in)
+
+Not a standalone module — the identity graph is built automatically after all primary and post-primary modules complete. It cross-references findings by shared usernames, profile photos, display names, and breach data to produce confidence-scored identity clusters.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Opt-in** | No — always runs |
+| **Status** | Implemented |
+
+The graph is available at:
+- CLI: displayed automatically (use `--show-collisions` to expand low-confidence clusters)
+- Web UI: `/investigation/:id/graph`
+- API: `GET /api/report/{id}/clusters` (clusters) and `GET /api/report/{id}/graph` (D3 nodes/links)
+
+**Cluster schema:**
+```json
+{
+  "id": "cluster-1",
+  "confidence": "high",
+  "score": 0.91,
+  "reasoning": "Shared username 'janedoe' across GitHub, HackerNews, and Twitter findings",
+  "members": [
+    {"module": "social", "platform": "GitHub", "username": "janedoe"},
+    {"module": "whatsmyname", "platform": "HackerNews", "username": "janedoe"}
+  ]
 }
 ```
 

@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](docker-compose.yml)
-[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.3.0&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
+[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.3.4&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mailaccess)](https://pypi.org/project/mailaccess/)
 
 Self-hostable OSINT platform for investigating email addresses. Fan out across breach databases, social networks, DNS records, and the open web — get back a unified exposure score and structured findings you can export or pipe into Maltego.
@@ -16,22 +16,23 @@ Built for security researchers, OSINT analysts, and penetration testers operatin
 
 ## Install
 
-### Quickest — CLI only
+### CLI only (no Docker)
 
 ```bash
 pip install mailaccess
-# or (recommended)
-pipx install mailaccess
-```
 
-### Full stack (Web UI + API + CLI)
+# Option A: auto-start (simplest)
+mailaccess investigate you@example.com
+# Server starts automatically, runs investigation,
+# stops when done.
 
-```bash
+# Option B: keep server running
+mailaccess serve  # in one terminal
+mailaccess investigate you@example.com  # in another
+
+# Option C: full stack with Web UI
 git clone https://github.com/YOUR_USERNAME/mailaccess
-cd mailaccess
 docker compose up -d
-pip install mailaccess
-mailaccess config set-url http://localhost:8000
 ```
 
 ## Quick Start
@@ -39,10 +40,13 @@ mailaccess config set-url http://localhost:8000
 ```bash
 mailaccess investigate you@example.com
 mailaccess investigate you@example.com -o report.pdf
-mailaccess investigate you@example.com --format json
+mailaccess investigate you@example.com --format jsonl
+mailaccess investigate -                        # read email from stdin
+mailaccess serve                                # start backend server on :8000
 mailaccess keys list
 mailaccess keys set HIBP_API_KEY your-key-here
 mailaccess modules
+mailaccess doctor                               # coming soon
 ```
 
 <!-- screenshot -->
@@ -72,8 +76,11 @@ mailaccess modules
 | emailrep | Reputation + blacklist | No | No |
 | hudson_rock | Infostealer logs (free) | No | No |
 | google_dork | 5 automated dorks | Yes (SerpAPI) | No |
-| domain_intel | WHOIS + DNS + Shodan | No (Shodan optional) | No |
+| domain_intel | Domain + Shodan | No (Shodan optional) | No |
+| dns_lookup | MX/SPF/DMARC/DKIM/A/NS extraction | No | No |
+| whois_lookup | Domain WHOIS, privacy detection | No | No |
 | social | 13 platforms via YAML | No | No |
+| social_links | Username extraction, feeds pivot | No | No |
 | account_discovery | Holehe 120+ platforms | No | Yes |
 | user_scanner | 205+ platform vectors | No | Yes |
 | whatsmyname | 700+ platforms | No | Yes |
@@ -83,6 +90,7 @@ mailaccess modules
 | phone_intel | Phone validation + WA/TG hints | No | No |
 | messaging_hints | Telegram/WhatsApp username check | No | No |
 | ghunt | Gmail deep intel | No (setup required) | Yes |
+| identity_graph | Cross-platform cluster analysis | No | No (automatic) |
 
 > 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
 
@@ -92,7 +100,30 @@ Every investigation generates a cross-platform identity graph linking accounts b
 
 `/investigation/:id/graph`
 
-Export as Neo4j Cypher via `GET /api/report/{id}/graph`
+Export as D3-compatible JSON via `GET /api/report/{id}/graph` or fetch clusters with confidence scores via `GET /api/report/{id}/clusters`.
+
+Findings are automatically grouped into identity clusters with confidence scoring. Use `--show-collisions` to expand low-confidence matches in CLI output.
+
+## Pipeline
+
+MailAccess is pipeline-friendly: read target emails from stdin, stream JSONL output, and branch on exit codes in CI/CD scripts.
+
+```bash
+# Batch from file
+cat emails.txt | mailaccess investigate -
+
+# Stream JSONL
+mailaccess investigate you@example.com --format jsonl | jq .
+
+# Filter critical findings
+mailaccess investigate you@example.com --format jsonl | jq 'select(.severity=="critical")'
+```
+
+**Exit codes:** `0` clean · `1` findings · `2` breaches · `3` error
+
+See [docs/integrations.md](docs/integrations.md#pipeline-integration) for GitHub Actions examples.
+
+---
 
 ## Adding a Platform
 
@@ -140,6 +171,8 @@ Open **http://localhost:3000** in your browser. Full setup guide: [docs/self-hos
 | Command | Description |
 |---------|-------------|
 | `mailaccess investigate <email>` | Run a full investigation against an email address |
+| `mailaccess investigate -` | Read target email from stdin |
+| `mailaccess serve` | Start the backend server on :8000 |
 | `mailaccess history` | List past investigations |
 | `mailaccess keys list` | Show all configured API keys |
 | `mailaccess keys set <KEY> <value>` | Set an API key |
@@ -147,6 +180,7 @@ Open **http://localhost:3000** in your browser. Full setup guide: [docs/self-hos
 | `mailaccess config set-url <url>` | Point the CLI at a MailAccess instance |
 | `mailaccess modules` | List all available modules |
 | `mailaccess commands` | List all CLI commands |
+| `mailaccess doctor` | Check configuration and module health _(coming soon)_ |
 
 The `--output` / `-o` flag on `investigate` saves the report to a file. The extension determines the format: `.json`, `.csv`, `.pdf`, `.md`, `.stix.json`, `.maltego.csv`.
 
@@ -176,6 +210,28 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | [GitHub](https://github.com/YOUR_USERNAME/mailaccess) | Source code, issues, releases |
 
 ## Changelog
+
+### 0.3.4
+
+- Clean terminal output (no log noise, no duplicate tables)
+- Identity graph surfaced in CLI with confidence clusters
+- Pipeline support: stdin, jsonl output, exit codes
+- Score displayed as fraction (N/100, X/20 modules)
+- Real DNS/WHOIS implementation (no more stubs)
+- `mailaccess serve` command + auto-start on first investigate call
+- Grouped skipped modules (BREACH/RECON/OPTIONAL)
+
+### 0.3.3
+
+- Scoring overhaul, false-positive reduction, noise fixes
+
+### 0.3.2
+
+- Fix WebSocket hang, CLI output redesign, consistent findings rendering
+
+### 0.3.1
+
+- CLI fixes: keys/config subcommands, Windows UTF-8, banner version
 
 ### 0.3.0
 

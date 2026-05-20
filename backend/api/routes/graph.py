@@ -51,3 +51,46 @@ async def get_investigation_graph(
     graph = IdentityGraph.build(graph_input)
     d3 = graph.to_d3()
     return d3
+
+@router.get("/report/{investigation_id}/clusters")
+async def get_investigation_clusters(
+    investigation_id: str,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return identity clusters scored by confidence."""
+    result = await session.execute(
+        select(Investigation)
+        .where(Investigation.id == investigation_id)
+        .options(
+            selectinload(Investigation.findings),
+        )
+    )
+    inv = result.scalar_one_or_none()
+    if inv is None:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    if inv.status.value != "complete":
+        raise HTTPException(
+            status_code=409,
+            detail="Investigation not complete — clusters not yet available",
+        )
+
+    raw_findings = [
+        {"module_name": f.module_name, "data": f.data}
+        for f in inv.findings
+    ]
+    graph_input = {
+        "email": inv.email,
+        "findings": raw_findings,
+    }
+    graph = IdentityGraph.build(graph_input)
+    clusters = graph.to_cli(raw_findings)
+    
+    total_findings = len(raw_findings)
+    collapsed_findings = sum(c["finding_count"] for c in clusters if c["is_collision"])
+    
+    return {
+        "clusters": clusters,
+        "total_findings": total_findings,
+        "collapsed_findings": collapsed_findings
+    }

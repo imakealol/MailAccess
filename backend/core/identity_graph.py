@@ -335,3 +335,140 @@ class IdentityGraph:
                 f"CREATE (a)-[:{edge.type.upper()}]->(b)"
             )
         return "\n".join(lines)
+
+    def cluster_confidence(self) -> list[dict[str, Any]]:
+        results = []
+        email_domain = ""
+        for node in self.nodes.values():
+            if node.type == "email":
+                email_domain = node.value.split("@")[-1] if "@" in node.value else ""
+                break
+
+        for cluster_nodes in self.clusters:
+            score = 0.0
+            reasoning = []
+            
+            platforms = cluster_nodes
+            platform_count = len(platforms)
+            
+            attr_counts: dict[str, dict[str, set[str]]] = {
+                "username": {},
+                "display_name": {},
+                "photo_url": {},
+                "domain": {}
+            }
+            breach_confirmed = False
+            
+            for edge in self.edges:
+                if edge.source in platforms:
+                    target_node = self.nodes.get(edge.target)
+                    if not target_node:
+                        continue
+                    if edge.type == "shared_username" and target_node.type == "username":
+                        attr_counts["username"].setdefault(target_node.value, set()).add(edge.source)
+                    elif edge.type == "shared_display_name" and target_node.type == "display_name":
+                        attr_counts["display_name"].setdefault(target_node.value, set()).add(edge.source)
+                    elif edge.type == "shared_photo" and target_node.type == "photo_url":
+                        attr_counts["photo_url"].setdefault(target_node.value, set()).add(edge.source)
+                    elif edge.type == "same_platform_group" and target_node.type == "domain":
+                        attr_counts["domain"].setdefault(target_node.value, set()).add(edge.source)
+                
+                if edge.target in platforms and edge.type == "breach_confirmed":
+                    breach_confirmed = True
+
+            max_shared_username = max([len(s) for s in attr_counts["username"].values()] + [0])
+            max_shared_display = max([len(s) for s in attr_counts["display_name"].values()] + [0])
+            max_shared_photo = max([len(s) for s in attr_counts["photo_url"].values()] + [0])
+            
+            if max_shared_username >= 3:
+                score += 0.30
+                for u, s in attr_counts["username"].items():
+                    if len(s) == max_shared_username:
+                        reasoning.append(f"username {u} shared on {max_shared_username} platforms")
+                        break
+                        
+            if max_shared_display >= 2:
+                score += 0.20
+                reasoning.append(f"display name matches across {max_shared_display} platforms")
+                
+            if max_shared_photo >= 2:
+                score += 0.20
+                reasoning.append(f"photo_url matches across {max_shared_photo} platforms")
+                
+            has_domain_match = False
+            matched_dom = ""
+            for dom, s in attr_counts["domain"].items():
+                if dom == email_domain or (email_domain and dom.endswith(email_domain)):
+                    has_domain_match = True
+                    matched_dom = dom
+                    break
+                    
+            if has_domain_match:
+                score += 0.15
+                reasoning.append(f"email domain {matched_dom} found in profile")
+                
+            if breach_confirmed:
+                score += 0.10
+                reasoning.append("breach confirmed account")
+                
+            if platform_count > 3:
+                score += 0.05 * (platform_count - 3)
+                
+            score = min(score, 1.0)
+            
+            label = "likely target"
+            if score < 0.40:
+                label = "likely name collision"
+                if not reasoning:
+                    reasoning.append(f"{platform_count} platforms matched username only, no corroborating signals")
+            elif score < 0.70:
+                label = "possible match"
+                
+            results.append({
+                "cluster_nids": cluster_nodes,
+                "confidence": round(score, 2),
+                "label": label,
+                "reasoning": reasoning[:3],
+                "is_collision": label == "likely name collision"
+            })
+            
+        return results
+
+    def to_cli(self, raw_findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        findings_by_platform: dict[str, list[dict[str, Any]]] = {}
+        for f in raw_findings:
+            if not isinstance(f, dict):
+                continue
+            item = f.get("data") if "data" in f else f
+            if not isinstance(item, dict):
+                continue
+            platform = str(item.get("platform") or f.get("module_name") or "unknown")
+            findings_by_platform.setdefault(platform, []).append(f)
+            
+        clusters_data = self.cluster_confidence()
+        
+        output = []
+        for cd in clusters_data:
+            c_findings = []
+            for nid in cd["cluster_nids"]:
+                platform_node = self.nodes.get(nid)
+                if platform_node:
+                    pf_name = platform_node.value
+                    if pf_name in findings_by_platform:
+                        for finding in findings_by_platform[pf_name]:
+                            if finding not in c_findings:
+                                c_findings.append(finding)
+            
+            c_findings.sort(key=lambda x: str((x.get("data") or x).get("confidence", "high")), reverse=True)
+            
+            output.append({
+                "confidence": cd["confidence"],
+                "label": cd["label"],
+                "reasoning": cd["reasoning"],
+                "findings": c_findings,
+                "finding_count": len(c_findings),
+                "is_collision": cd["is_collision"]
+            })
+            
+        output.sort(key=lambda x: x["confidence"], reverse=True)
+        return output

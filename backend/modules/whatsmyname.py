@@ -142,6 +142,7 @@ class WhatsMyNameModule(BaseModule):
                 findings.append({
                     "platform": entry["name"],
                     "profile_url": detail,
+                    "username": username,
                     "metadata": {
                         "category": entry.get("category", ""),
                         **({"search_result": True} if is_search else {}),

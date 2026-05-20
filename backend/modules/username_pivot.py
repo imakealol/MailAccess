@@ -145,6 +145,7 @@ class UsernamePivotModule(BaseModule):
                     findings.append({
                         "platform": platform,
                         "profile_url": profile_url,
+                        "username": username,
                         "metadata": {
                             "matched_username": username,
                             "category": entry.get("category", ""),

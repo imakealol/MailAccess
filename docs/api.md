@@ -48,17 +48,28 @@ Start an investigation. Returns immediately with an ID — the investigation run
 ```json
 {
   "email": "user@example.com",
-  "modules": ["hibp", "gravatar"]
+  "modules": ["hibp", "gravatar"],
+  "force": false
 }
 ```
 
-`modules` is optional. Omit it to run all registered modules.
+`modules` is optional. Omit it to run all registered modules. Set `force: true` to bypass the investigation cache and always run a fresh investigation.
 
-**Response `202`**
+**Response `202`** — new investigation started
 ```json
 {
   "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "status": "pending",
+  "created_at": "2026-05-19T12:00:00+00:00"
+}
+```
+
+**Response `200`** — cached result returned (when `ENABLE_INVESTIGATION_CACHE=true` and a complete result exists within the cache window)
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "complete",
+  "cached": true,
   "created_at": "2026-05-19T12:00:00+00:00"
 }
 ```
@@ -193,6 +204,55 @@ Filename pattern: `mailaccess_{email}_{id}.{ext}`
 **Errors**
 - `404` — investigation not found
 - `501` — format not yet implemented
+
+---
+
+### `GET /api/report/{id}/clusters`
+
+Returns the identity clusters built from cross-module correlation, with confidence scores and reasoning strings.
+
+**Response `200`**
+```json
+{
+  "clusters": [
+    {
+      "id": "cluster-1",
+      "confidence": "high",
+      "score": 0.91,
+      "reasoning": "Shared username 'janedoe' across GitHub, HackerNews, and Twitter findings",
+      "members": [
+        {"module": "social", "platform": "GitHub", "username": "janedoe"},
+        {"module": "whatsmyname", "platform": "HackerNews", "username": "janedoe"}
+      ]
+    }
+  ]
+}
+```
+
+**Errors**
+- `404` — investigation not found or not yet complete
+
+---
+
+### `GET /api/report/{id}/graph`
+
+Returns a D3-compatible graph representation of the identity graph for use in visualization or export.
+
+**Response `200`**
+```json
+{
+  "nodes": [
+    {"id": "email:user@example.com", "type": "email", "label": "user@example.com"},
+    {"id": "account:github:janedoe", "type": "account", "label": "janedoe", "platform": "GitHub"}
+  ],
+  "links": [
+    {"source": "email:user@example.com", "target": "account:github:janedoe", "confidence": "high"}
+  ]
+}
+```
+
+**Errors**
+- `404` — investigation not found or not yet complete
 
 ---
 
