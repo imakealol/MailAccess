@@ -1,0 +1,11 @@
+name: Adobe
+url: https://auth.services.adobe.com/signin/v2/users/accounts
+category: social
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  username: "{email}"
+check_type: json_field
+json_success_path: users
+confidence: medium

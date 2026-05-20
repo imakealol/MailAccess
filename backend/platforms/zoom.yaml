@@ -1,0 +1,10 @@
+name: zoom
+url: https://zoom.us/signin/confirm_account
+category: communication
+method: POST
+body:
+  email: "{email}"
+check_type: body_not_contains
+failure_string: not found|does not exist|invalid
+confidence: medium
+notes: inferred via confirmation flow

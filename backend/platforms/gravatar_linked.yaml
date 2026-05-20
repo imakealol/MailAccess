@@ -1,0 +1,7 @@
+name: Gravatar Linked
+url: https://www.gravatar.com/{md5}.json
+category: social
+method: GET
+check_type: json_field
+json_success_path: entry.0.accounts
+confidence: high

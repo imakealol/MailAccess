@@ -9,6 +9,7 @@ from holehe.core import get_functions, import_submodules
 
 from ..config import settings
 from ..core.http_client import build_client
+from ..core.phone_extractor import mask_phone
 from .base import BaseModule, ModuleResult, ModuleStatus
 
 _LOG = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ def _make_finding(result: dict[str, Any]) -> dict[str, Any]:
     if result.get("emailrecovery"):
         meta["email_recovery"] = result["emailrecovery"]
     if result.get("phoneNumber"):
-        meta["phone_hint"] = result["phoneNumber"]
+        meta["phone_hint"] = mask_phone(result["phoneNumber"])
     if result.get("others"):
         meta["extras"] = result["others"]
     if result.get("emailrecovery") or result.get("phoneNumber"):

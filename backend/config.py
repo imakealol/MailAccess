@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # WhatsMyName (opt-in — username enumeration across 700+ platforms, takes 60–90s)
     enable_whatsmyname: bool = False
 
+    # User-scanner (opt-in — probes 205+ platforms via user-scanner; can take several minutes)
+    enable_user_scanner: bool = False
+
+    # Username pivot (opt-in — re-runs WhatsMyName for recovered usernames after primary modules)
+    enable_username_pivot: bool = False
+
     # Permutation discovery (opt-in — generates email variations from recovered names,
     # then probes each with HIBP + Hudson Rock; adds 30–60s and up to 120 API calls)
     enable_permutation_discovery: bool = False
@@ -41,6 +47,12 @@ class Settings(BaseSettings):
     # Cookies expire periodically and require manual refresh via `ghunt login`.
     enable_ghunt: bool = False
     ghunt_creds_path: str | None = None
+
+    # Phone intel: validates recovered phones and probes WhatsApp/Telegram (post-primary)
+    enable_phone_intel: bool = True
+
+    # Messaging hints: Telegram username checks during primary gather
+    enable_messaging_hints: bool = True
 
     # Webhooks
     slack_webhook_url: str | None = None
@@ -52,6 +64,7 @@ class Settings(BaseSettings):
     mailaccess_api_key: str | None = None
     haveibeenpwned_api_key: str | None = None
     hibp_api_key: str | None = None
+    breachdirectory_api_key: str | None = None
     hunter_io_api_key: str | None = None
     emailrep_api_key: str | None = None
     shodan_api_key: str | None = None

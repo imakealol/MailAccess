@@ -1,0 +1,12 @@
+name: Snapchat
+url: https://accounts.snapchat.com/accounts/get_username_suggestions
+category: social
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  email: "{email}"
+check_type: body_contains
+success_string: suggestions|reference|error_message|taken|exists
+confidence: low
+notes: experimental

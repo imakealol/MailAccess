@@ -1,0 +1,16 @@
+name: discord
+url: https://discord.com/api/v9/auth/register
+category: communication
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  email: "{email}"
+  username: a
+  password: Aa1!aaaa
+  date_of_birth: "1990-01-01"
+  consent: true
+check_type: json_field
+json_success_path: errors.email
+confidence: medium
+notes: inferred via registration check

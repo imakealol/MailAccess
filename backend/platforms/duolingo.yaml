@@ -1,0 +1,11 @@
+name: Duolingo
+url: https://www.duolingo.com/2017-06-30/users?email={email}
+category: social
+method: GET
+check_type: json_field
+json_success_path: users.0.username
+confidence: high
+extract:
+  username: users.0.username
+  display_name: users.0.name
+  avatar_url: users.0.picture

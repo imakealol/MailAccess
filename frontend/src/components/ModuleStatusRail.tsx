@@ -28,9 +28,14 @@ const MODULE_META: Record<string, { label: string; icon: string }> = {
   discord:        { label: 'Discord',    icon: '👾' },
   account_discovery:      { label: 'AcctDisc', icon: '⊞' },
   whatsmyname:            { label: 'WMN',      icon: '⊙' },
+  user_scanner:           { label: 'UsrScan',  icon: '⊛' },
+  username_pivot:         { label: 'UsrPivot', icon: '↻' },
+  breachdirectory:        { label: 'BrchDir',  icon: '⚠' },
   hudson_rock:            { label: 'HudsnRck', icon: '☠' },
   permutation_discovery:  { label: 'Permute',  icon: '⇌' },
   ghunt:                  { label: 'GHunt',    icon: '◉' },
+  phone_intel:            { label: 'Phone',    icon: '☎' },
+  messaging_hints:        { label: 'MsgHint',  icon: '✉' },
 }
 
 interface DotProps {

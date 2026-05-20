@@ -1,0 +1,16 @@
+name: Patreon
+url: https://www.patreon.com/api/auth?include=campaign
+category: social
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  data:
+    type: user
+    attributes:
+      email: "{email}"
+      password: invalid_password_123
+check_type: body_not_contains
+failure_string: not found|does not exist|invalid email
+confidence: medium
+notes: inferred via reset flow

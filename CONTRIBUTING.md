@@ -91,6 +91,25 @@ PDF exports use an async `generate()` method instead of `export()`; see `PdfExpo
 
 ---
 
+## Adding a New Platform
+
+OSINT social / communication probes are defined as YAML files — no Python changes required.
+
+1. Create `backend/platforms/{platform_name}.yaml` (copy from `backend/platforms/TEMPLATE.yaml`).
+2. Follow the schema in `backend/platforms/schema.py` (`PlatformCheck` fields).
+3. Set `category` to `social` or `communication` (the `social` module loads both).
+4. Test locally:
+
+   ```bash
+   mailaccess investigate test@example.com --modules social
+   ```
+
+5. Open a PR with the YAML only. Invalid files are logged and skipped at runtime; they do not crash the server.
+
+Use `|` in `success_string` or `failure_string` for multiple alternative substrings (OR). Use `{email}`, `{username}`, or `{md5}` in URLs and bodies.
+
+---
+
 ## Releasing a new version
 
 1. Bump version in `pyproject.toml`

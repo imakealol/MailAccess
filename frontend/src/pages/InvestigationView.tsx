@@ -67,6 +67,15 @@ export default function InvestigationView() {
         <span className={`text-xs uppercase tracking-widest px-2 py-0.5 border rounded-sm ${statusStyle}`}>
           {store.status}
         </span>
+        {store.status === 'complete' && id && (
+          <button
+            type="button"
+            onClick={() => navigate(`/investigation/${id}/graph`)}
+            className="ml-2 px-3 py-0.5 text-xs font-mono border border-zinc-700 text-zinc-300 rounded-sm hover:border-cyan-400 hover:text-cyan-400 transition-colors"
+          >
+            Graph
+          </button>
+        )}
       </header>
 
       {/* Summary bar */}

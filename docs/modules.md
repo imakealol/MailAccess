@@ -289,6 +289,116 @@ Opt-in (`ENABLE_WHATSMYNAME=true`) because the sweep fires one HTTP request per 
 
 ---
 
+## `user_scanner`
+
+Email registration probes across 205+ platforms via the [user-scanner](https://pypi.org/project/user-scanner/) package.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+Opt-in (`ENABLE_USER_SCANNER=true`) because a full sweep can take several minutes. Set `user_scanner` in `MODULE_TIMEOUT_OVERRIDES` (default 180s in `.env.example`).
+
+**Finding example (account confirmed):**
+```json
+{
+  "platform": "Instagram",
+  "profile_url": "https://instagram.com",
+  "metadata": {
+    "category": "Social",
+    "reason": "",
+    "source": "user_scanner"
+  },
+  "confidence": "high"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "platforms_checked": 205,
+  "platforms_confirmed": 4,
+  "platforms_not_registered": 198,
+  "user_scanner_version": "1.3.6"
+}
+```
+
+---
+
+## `username_pivot`
+
+Post-primary phase: collects up to five unique usernames from primary findings (email local-part, metadata usernames, slugified display names) and re-runs the WhatsMyName dataset for each. Skips platforms already confirmed by the `whatsmyname` module.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+Opt-in (`ENABLE_USERNAME_PIVOT=true`). Runs after primary modules complete and before `permutation_discovery`. Reuses the cached WMN dataset at `data/cache/wmn-data.json`.
+
+**Finding example:**
+```json
+{
+  "platform": "GitHub",
+  "profile_url": "https://github.com/katriel_moses",
+  "metadata": {
+    "matched_username": "katriel_moses",
+    "category": "dev",
+    "source": "username_pivot"
+  },
+  "confidence": "medium"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "usernames_pivoted": ["katriel.moses", "katriel_moses"],
+  "platforms_checked": 1600,
+  "platforms_confirmed": 2,
+  "wmn_version": "1.4.0"
+}
+```
+
+---
+
+## `breachdirectory`
+
+Search breach records for the target email via the [BreachDirectory RapidAPI](https://rapidapi.com/rohan-patra/api/breachdirectory).
+
+| | |
+|--|--|
+| **Requires key** | Yes — `BREACHDIRECTORY_API_KEY` |
+| **Status** | Implemented |
+
+One finding per unique breach source. Passwords and hashes are never stored in full — only a two-character hint (e.g. `pa***`) when a password field is present.
+
+**Finding example:**
+```json
+{
+  "platform": "Collection1",
+  "metadata": {
+    "breach_source": "Collection1",
+    "has_password_hash": true,
+    "password_hint": "pa***"
+  },
+  "confidence": "high",
+  "severity": "critical"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "total_records_found": 3,
+  "sources_list": ["Collection1", "LinkedIn"],
+  "has_plaintext_hashes": false
+}
+```
+
+---
+
 ## `hudson_rock`
 
 Check if the email address appears in infostealer credential logs via the Hudson Rock Cavalier API.
@@ -416,6 +526,97 @@ Requires the `ghunt` extra: `pip install "mailaccess[ghunt]"` and a one-time `gh
     "possible_location_hint": "London, Shoreditch"
   },
   "confidence": "high"
+}
+```
+
+---
+
+## `phone_intel`
+
+Validates phone numbers recovered from primary module findings and probes WhatsApp/Telegram registration hints.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+Runs in the **post-primary** phase when `ENABLE_PHONE_INTEL=true` (default) and at least one phone number was extracted from prior findings. Skips with `status: skipped` when no phones are found.
+
+Phone numbers are never stored in full in findings — only masked values (e.g. `+1234***7890`).
+
+**Findings schema (validation):**
+```json
+{
+  "platform": "phone_validation",
+  "metadata": {
+    "phone_number": "+1234***7890",
+    "valid": true,
+    "country": "United States",
+    "carrier": "Verizon",
+    "line_type": "mobile",
+    "platform_hint": "numverify"
+  },
+  "confidence": "high"
+}
+```
+
+**Findings schema (WhatsApp / Telegram — experimental):**
+```json
+{
+  "platform": "whatsapp",
+  "profile_url": "https://wa.me/15551234567",
+  "metadata": {
+    "phone_number": "+1555***4567",
+    "experimental": true,
+    "platform_hint": "possible_registration"
+  },
+  "confidence": "low"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "phones_processed": 2,
+  "phones_found": 3
+}
+```
+
+---
+
+## `messaging_hints`
+
+Best-effort Telegram username checks during the primary gather phase. Optional WhatsApp hints when phone numbers are available.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Status** | Implemented |
+
+Enabled by default (`ENABLE_MESSAGING_HINTS=true`). Rate-limited to **3 Telegram username checks** per investigation. Signal has no public lookup API — noted in module metadata as `signal_checkable: false`.
+
+**Findings schema:**
+```json
+{
+  "platform": "telegram",
+  "profile_url": "https://t.me/username",
+  "metadata": {
+    "username": "jane.doe",
+    "display_name": "Jane Doe",
+    "photo_url": "https://...",
+    "check_type": "username",
+    "experimental": true
+  },
+  "confidence": "low"
+}
+```
+
+**Module metadata:**
+```json
+{
+  "telegram_checks": 3,
+  "whatsapp_checks": 0,
+  "signal_checkable": false
 }
 ```
 

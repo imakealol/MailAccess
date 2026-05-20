@@ -1,0 +1,13 @@
+name: Spotify
+url: https://www.spotify.com/api/account/forgot-password/
+category: social
+method: POST
+body:
+  email: "{email}"
+check_type: body_not_contains
+failure_string: not found|does not exist|invalid email
+confidence: medium
+notes: inferred via reset flow
+rate_limited_strings:
+  - too many requests
+  - "429"

@@ -1,0 +1,12 @@
+name: linkedin
+url: https://www.linkedin.com/uas/request-password-reset
+category: communication
+method: POST
+headers:
+  Content-Type: application/x-www-form-urlencoded
+body:
+  email: "{email}"
+check_type: status
+success_status: 200
+confidence: medium
+notes: inferred via reset flow — limited signal

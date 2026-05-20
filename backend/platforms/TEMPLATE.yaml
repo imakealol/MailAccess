@@ -1,0 +1,63 @@
+# Copy this file to {platform_name}.yaml and fill in the fields.
+# Pipe (|) in success_string / failure_string means OR — any match counts.
+
+# Display name shown in findings (required)
+name: Example Platform
+
+# Request URL; supports {email}, {username}, {md5} placeholders (required)
+url: https://api.example.com/check?email={email}
+
+# Loader category: social | communication | education | etc. (required)
+category: social
+
+# HTTP method (default: GET)
+method: GET
+
+# POST body — values support {email} / {username} placeholders (optional)
+# body:
+#   email: "{email}"
+
+# Extra request headers merged with default User-Agent (optional)
+# headers:
+#   Content-Type: application/json
+
+# How to decide the account exists (required)
+#   status            — response.status_code == success_status
+#   body_contains     — any success_string substring in body (case-insensitive)
+#   body_not_contains — none of the failure_string substrings in body
+#   json_field        — dot-path into JSON body (see json_success_* below)
+check_type: body_not_contains
+
+# Expected HTTP status for check_type: status (default: 200)
+success_status: 200
+
+# Substrings that indicate success (body_contains) — use | for OR (optional)
+# success_string: account found|user exists
+
+# Substrings that indicate failure (body_not_contains) — use | for OR (optional)
+failure_string: not found|does not exist
+
+# Dot-notation path into JSON response (json_field) (optional)
+# json_success_path: data.user.id
+
+# If set, path value must equal this string; if omitted, any truthy value wins (optional)
+# json_success_value: "1"
+
+# Finding confidence: high | medium | low (default: medium)
+confidence: medium
+
+# Per-request timeout in seconds (default: 8)
+timeout: 8
+
+# Stored in finding metadata as note or flag (optional)
+notes: inferred via public API
+
+# Body substrings that mean rate-limited — finding skipped, not an error (optional)
+rate_limited_strings:
+  - too many requests
+  - "429"
+
+# Map output metadata fields to JSON dot-paths or regex:pattern (optional)
+# extract:
+#   username: data.user.name
+#   user_id: regex:"id":(\d+)

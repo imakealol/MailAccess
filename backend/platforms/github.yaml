@@ -1,0 +1,9 @@
+name: GitHub
+url: https://api.github.com/search/users
+category: social
+method: GET
+headers:
+  Accept: application/vnd.github+json
+check_type: json_field
+json_success_path: total_count
+confidence: high

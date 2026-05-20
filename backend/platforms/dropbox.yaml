@@ -1,0 +1,11 @@
+name: dropbox
+url: https://www.dropbox.com/register
+category: social
+method: POST
+body:
+  login_email: "{email}"
+  login_password: x
+check_type: body_contains
+success_string: already in use|already taken|exists|incorrect
+confidence: medium
+notes: inferred via registration flow

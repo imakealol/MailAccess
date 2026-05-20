@@ -1,0 +1,14 @@
+name: skype_microsoft
+url: https://login.live.com/GetCredentialType.srf
+category: communication
+method: POST
+headers:
+  Content-Type: application/json
+body:
+  username: "{email}"
+  uaid: ""
+  isOtherIdpSupported: true
+check_type: json_field
+json_success_path: IfExistsResult
+json_success_value: "0"
+confidence: high

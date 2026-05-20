@@ -13,8 +13,19 @@ from ..modules.base import ModuleResult, ModuleStatus
 
 # Module categories for exposure scoring
 _INFOSTEALER_MODULES = frozenset({"hudson_rock"})
-_BREACH_MODULES = frozenset({"hibp"})
-_SOCIAL_MODULES = frozenset({"gravatar", "social_links", "google_search", "ghunt", "whatsmyname", "account_discovery", "social"})
+_BREACH_MODULES = frozenset({"hibp", "breachdirectory"})
+_SOCIAL_MODULES = frozenset({
+    "gravatar",
+    "social_links",
+    "google_search",
+    "ghunt",
+    "whatsmyname",
+    "account_discovery",
+    "user_scanner",
+    "username_pivot",
+    "social",
+})
+_POST_PRIMARY_ONLY = frozenset({"username_pivot", "phone_intel"})
 
 _WEIGHT_INFOSTEALER = 20  # critical: active malware compromise
 _WEIGHT_BREACH = 15       # high: credential exposure
@@ -87,6 +98,7 @@ class InvestigationEngine:
             classes = [c for c in get_all_modules() if c.name in module_names]
         else:
             classes = get_all_modules()
+        classes = [c for c in classes if c.name not in _POST_PRIMARY_ONLY]
 
         queue: asyncio.Queue[QueueEvent | None] = asyncio.Queue()
         semaphore = asyncio.Semaphore(self._max_concurrency)
@@ -128,9 +140,43 @@ class InvestigationEngine:
                 return_exceptions=True,
             )
 
+            from ..config import settings as _cfg
+
+            if _cfg.enable_username_pivot:
+                from ..modules.username_pivot import UsernamePivotModule
+
+                _pivot = UsernamePivotModule()
+                _pivot_timeout = _cfg.module_timeout_overrides.get(
+                    _pivot.name, _cfg.module_timeout_seconds
+                )
+                await queue.put(QueueEvent(type="module_start", module_name=_pivot.name))
+                try:
+                    _pivot_result = await asyncio.wait_for(
+                        _pivot.run(email, collected), timeout=_pivot_timeout
+                    )
+                except asyncio.TimeoutError:
+                    _pivot_result = ModuleResult(
+                        status=ModuleStatus.FAILED,
+                        errors=[f"timed out after {_pivot_timeout}s"],
+                    )
+                except Exception as _exc:
+                    _pivot_result = ModuleResult(
+                        status=ModuleStatus.FAILED, errors=[str(_exc)]
+                    )
+                collected[_pivot.name] = _pivot_result
+                _pivot_evt = (
+                    "module_error"
+                    if _pivot_result.status == ModuleStatus.FAILED
+                    else "module_result"
+                )
+                await queue.put(
+                    QueueEvent(
+                        type=_pivot_evt, module_name=_pivot.name, result=_pivot_result
+                    )
+                )
+
             # Permutation discovery phase — runs after primary modules so it can
             # read their findings to extract a real name.
-            from ..config import settings as _cfg
             if _cfg.enable_permutation_discovery:
                 from ..modules.permutation_discovery import PermutationDiscovery
                 _perm = PermutationDiscovery()
@@ -151,10 +197,86 @@ class InvestigationEngine:
                     QueueEvent(type=_evt, module_name=_perm.name, result=_perm_result)
                 )
 
+            if _cfg.enable_phone_intel:
+                from ..core.phone_extractor import extract_phones
+                from ..modules.phone_intel import PhoneIntelModule
+
+                _phone = PhoneIntelModule()
+                _phone_timeout = _cfg.module_timeout_overrides.get(
+                    _phone.name, _cfg.module_timeout_seconds
+                )
+                await queue.put(QueueEvent(type="module_start", module_name=_phone.name))
+                try:
+                    _phone_result = await asyncio.wait_for(
+                        _phone.run(email, collected), timeout=_phone_timeout
+                    )
+                except asyncio.TimeoutError:
+                    _phone_result = ModuleResult(
+                        status=ModuleStatus.FAILED,
+                        errors=[f"timed out after {_phone_timeout}s"],
+                    )
+                except Exception as _exc:
+                    _phone_result = ModuleResult(
+                        status=ModuleStatus.FAILED, errors=[str(_exc)]
+                    )
+                collected[_phone.name] = _phone_result
+                _phone_evt = (
+                    "module_error"
+                    if _phone_result.status == ModuleStatus.FAILED
+                    else "module_result"
+                )
+                await queue.put(
+                    QueueEvent(
+                        type=_phone_evt, module_name=_phone.name, result=_phone_result
+                    )
+                )
+
+                # Re-run messaging hints with recovered phones (WhatsApp path)
+                if _cfg.enable_messaging_hints:
+                    from ..modules.messaging_hints import MessagingHintsModule
+
+                    _all_findings: list = []
+                    for _r in collected.values():
+                        if hasattr(_r, "findings"):
+                            _all_findings.extend(_r.findings)
+                    _phones = extract_phones(_all_findings)
+                    if _phones:
+                        _msg = MessagingHintsModule()
+                        try:
+                            _msg_extra = await asyncio.wait_for(
+                                _msg.run(email, phone_hints=_phones, collected=collected),
+                                timeout=_cfg.module_timeout_seconds,
+                            )
+                            if _msg_extra.findings:
+                                prev = collected.get(_msg.name)
+                                if prev and hasattr(prev, "findings"):
+                                    prev.findings = list(prev.findings) + _msg_extra.findings
+                                    if prev.metadata and _msg_extra.metadata:
+                                        prev.metadata["whatsapp_followup"] = True
+                                else:
+                                    collected[_msg.name] = _msg_extra
+                        except Exception:
+                            pass
+
+            graph_data: dict | None = None
+            try:
+                from .identity_graph import IdentityGraph
+
+                _findings_flat = []
+                for _mod, _res in collected.items():
+                    if hasattr(_res, "findings"):
+                        for _f in _res.findings:
+                            _findings_flat.append({"module_name": _mod, "data": _f})
+                graph_data = IdentityGraph.build(
+                    {"email": email, "findings": _findings_flat}
+                ).to_d3()
+            except Exception:
+                graph_data = None
+
             # Persist before sentinel so consumers see the final score in the DB.
             self.status = InvestigationStatus.COMPLETE
             try:
-                await self._persist(investigation_id, collected, started_at)
+                await self._persist(investigation_id, collected, started_at, graph_data)
                 
                 # Dispatch webhooks if configured
                 try:
@@ -206,20 +328,24 @@ class InvestigationEngine:
         investigation_id: str,
         collected: dict[str, ModuleResult],
         started_at: datetime,
+        graph_data: dict | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         score = _compute_exposure_score(collected)
 
         async with AsyncSessionLocal() as session:
             async with session.begin():
+                values: dict = {
+                    "status": InvestigationStatus.COMPLETE,
+                    "completed_at": now,
+                    "exposure_score": score,
+                }
+                if graph_data is not None:
+                    values["graph_data"] = graph_data
                 await session.execute(
                     update(Investigation)
                     .where(Investigation.id == investigation_id)
-                    .values(
-                        status=InvestigationStatus.COMPLETE,
-                        completed_at=now,
-                        exposure_score=score,
-                    )
+                    .values(**values)
                 )
                 for module_name, result in collected.items():
                     session.add(

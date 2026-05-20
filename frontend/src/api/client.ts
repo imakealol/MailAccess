@@ -2,6 +2,23 @@ import type { PaginatedInvestigations } from '../types'
 
 const BASE = '/api'
 
+export interface GraphNode {
+  id: string
+  type: string
+  label: string
+  value: string
+  degree?: number
+  high_confidence_node?: boolean
+  metadata?: Record<string, unknown>
+}
+
+export interface GraphLink {
+  source: string
+  target: string
+  type: string
+  metadata?: Record<string, unknown>
+}
+
 export interface InvestigateResponse {
   id: string
   status: string
@@ -31,6 +48,10 @@ export const api = {
 
   getReport(id: string): Promise<Record<string, unknown>> {
     return request(`/report/${id}`)
+  },
+
+  getGraph(id: string): Promise<{ nodes: GraphNode[]; links: GraphLink[] }> {
+    return request(`/report/${id}/graph`)
   },
 
   listInvestigations(page = 1, pageSize = 10): Promise<PaginatedInvestigations> {

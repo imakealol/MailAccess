@@ -1,0 +1,14 @@
+name: apple
+url: https://appleid.apple.com/account/check/email
+category: social
+method: POST
+headers:
+  Content-Type: application/json
+  Accept: application/json
+  Referer: https://appleid.apple.com/account
+body:
+  email: "{email}"
+check_type: json_field
+json_success_path: used
+confidence: medium
+notes: inferred via Apple ID check

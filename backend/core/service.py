@@ -110,6 +110,7 @@ class InvestigationService:
             "email": inv.email,
             "status": inv.status.value,
             "exposure_score": inv.exposure_score,
+            "graph_data": inv.graph_data,
             "created_at": inv.created_at.isoformat(),
             "completed_at": inv.completed_at.isoformat() if inv.completed_at else None,
             "findings": [
