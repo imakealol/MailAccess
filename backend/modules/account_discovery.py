@@ -19,7 +19,7 @@ from .base import BaseModule, ModuleResult, ModuleStatus
 _LOG = logging.getLogger(__name__)
 _BATCH_SIZE = 20
 
-_CACHE_DIR = Path("data/cache/account_discovery")
+_CACHE_DIR = Path.home() / ".mailaccess" / "cache" / "account_discovery"
 _CACHE_TTL = 21_600  # 6 hours
 
 

@@ -19,7 +19,7 @@ _LOG = logging.getLogger(__name__)
 _WMN_DATA_URL = (
     "https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json"
 )
-_CACHE_PATH = Path("data/cache/wmn-data.json")
+_CACHE_PATH = Path.home() / ".mailaccess" / "cache" / "wmn-data.json"
 _CACHE_TTL = 86_400  # 24 hours
 _CONCURRENCY = 80
 _TIMEOUT = 6.0

@@ -30,21 +30,21 @@ class Settings(BaseSettings):
     # Per-module timeout overrides: MODULE_TIMEOUT_OVERRIDES={"whatsmyname": 120}
     module_timeout_overrides: dict[str, int] = {}
 
-    # Account discovery (opt-in — probes 120+ platforms via Holehe, can be noisy)
-    enable_account_discovery: bool = False
+    # Account discovery — probes 120+ platforms via Holehe
+    enable_account_discovery: bool = True
 
-    # WhatsMyName (opt-in — username enumeration across 700+ platforms, takes 60–90s)
-    enable_whatsmyname: bool = False
+    # WhatsMyName — username enumeration across 700+ platforms (~15s with concurrency)
+    enable_whatsmyname: bool = True
 
-    # User-scanner (opt-in — probes 205+ platforms via user-scanner; can take several minutes)
-    enable_user_scanner: bool = False
+    # User-scanner — probes 205+ platforms via user-scanner (no API key required)
+    enable_user_scanner: bool = True
 
-    # Username pivot (opt-in — re-runs WhatsMyName for recovered usernames after primary modules)
-    enable_username_pivot: bool = False
+    # Username pivot — re-runs WhatsMyName for recovered usernames after primary modules
+    enable_username_pivot: bool = True
 
-    # Permutation discovery (opt-in — generates email variations from recovered names,
-    # then probes each with HIBP + Hudson Rock; adds 30–60s and up to 120 API calls)
-    enable_permutation_discovery: bool = False
+    # Permutation discovery — generates email variations from recovered names,
+    # then probes each with Hudson Rock (+ HIBP if key is set)
+    enable_permutation_discovery: bool = True
 
     # GHunt (opt-in — requires ghunt>=2.3 installed and a valid creds file from `ghunt login`)
     # Cookies expire periodically and require manual refresh via `ghunt login`.
