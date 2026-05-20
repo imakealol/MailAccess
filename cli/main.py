@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,12 +17,15 @@ if sys.platform == "win32":
         sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
 
 import httpx
+import websockets
 import typer
 from dotenv import load_dotenv, set_key, unset_key
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
 
 # Auto-load ~/.mailaccess/.env before reading system env
 _ENV_FILE = Path.home() / ".mailaccess" / ".env"
@@ -38,7 +42,7 @@ BANNER = """\
 ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝╚══════╝╚══════╝
 [/bold red]
 [dim]Open-source OSINT email intelligence tool[/dim]
-[dim]v0.3.1 · pypi.org/project/mailaccess[/dim]"""
+[dim]v0.3.2 · pypi.org/project/mailaccess[/dim]"""
 
 app = typer.Typer(name="mailaccess", help="MailAccess OSINT email intelligence CLI.")
 console = Console()
@@ -272,6 +276,84 @@ def get_status_color(status: str) -> str:
     return "white"
 
 
+def _normalize_module_name(name: str) -> str:
+    return name.replace("_", " ").upper()
+
+
+def _short_id(inv_id: str, length: int = 8) -> str:
+    return inv_id[:length]
+
+
+def _display_url(value: str, max_len: int = 50) -> str:
+    cleaned = value.strip()
+    for prefix in ("https://", "http://"):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix) :]
+            break
+    if cleaned.startswith("www."):
+        cleaned = cleaned[4:]
+    if len(cleaned) <= max_len:
+        return cleaned
+    return f"{cleaned[: max_len - 3]}..."
+
+
+def _score_color(score: int | None) -> str:
+    if score is None:
+        return "white"
+    if score < 30:
+        return "green"
+    if score < 60:
+        return "yellow"
+    if score < 80:
+        return "dark_orange"
+    return "red"
+
+
+def _extract_finding_line(finding: dict[str, Any], default_name: str) -> tuple[str, str]:
+    platform = (
+        finding.get("platform")
+        or finding.get("service")
+        or finding.get("source")
+        or finding.get("site")
+        or default_name
+    )
+    url_like = (
+        finding.get("url")
+        or finding.get("profile_url")
+        or finding.get("link")
+        or finding.get("domain")
+        or finding.get("website")
+        or ""
+    )
+    if not url_like:
+        display_name = finding.get("display_name")
+        username = finding.get("username")
+        breach_name = finding.get("breach_name")
+        severity = finding.get("severity")
+        extra = next(
+            (v for v in (display_name, username, breach_name, severity) if isinstance(v, str) and v.strip()),
+            "",
+        )
+        url_like = extra
+    return str(platform), _display_url(str(url_like)) if url_like else ""
+
+
+def _format_duration(run: dict[str, Any]) -> str:
+    duration = run.get("duration_seconds")
+    if isinstance(duration, (int, float)):
+        return f"{duration:.1f}s"
+    started = run.get("started_at")
+    finished = run.get("completed_at") or run.get("finished_at")
+    if isinstance(started, str) and isinstance(finished, str):
+        try:
+            start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+            return f"{max((end_dt - start_dt).total_seconds(), 0):.1f}s"
+        except ValueError:
+            return "—"
+    return "..."
+
+
 # ── Investigate ───────────────────────────────────────────────────────────────
 
 async def _investigate(
@@ -280,6 +362,7 @@ async def _investigate(
     modules: str | None,
     timeout: int,
     output_file: str | None,
+    force: bool = False,
 ) -> None:
     base_url = get_backend_url()
     out = err_console if output_format == "json" else console
@@ -287,13 +370,17 @@ async def _investigate(
     payload: dict[str, Any] = {"email": email}
     if modules:
         payload["modules"] = [m.strip() for m in modules.split(",") if m.strip()]
+    if force:
+        payload["force"] = True
 
     async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
+        err_console.print(f"[dim]Backend: {base_url}[/dim]")
         try:
             resp = await client.post("/api/investigate", json=payload)
             resp.raise_for_status()
             data = resp.json()
             inv_id = data["id"]
+            cached = bool(data.get("cached"))
         except httpx.ConnectError:
             out.print("[red]Error:[/] cannot connect to MailAccess server", style="bold red")
             raise typer.Exit(1)
@@ -305,40 +392,253 @@ async def _investigate(
             raise typer.Exit(1)
 
         if output_format != "json":
-            out.print(f"[bold cyan]Investigating:[/] {email} (ID: {inv_id})\n")
+            started_time = datetime.now().strftime("%H:%M:%S")
+            header = Text()
+            header.append("🔍  ", style="bold")
+            header.append(email, style="bold cyan")
+            header.append("\n")
+            header.append(
+                f"ID: {_short_id(inv_id)} · Started: {started_time}",
+                style="dim",
+            )
+            out.print(Rule(style="dim"))
+            out.print(header)
+            out.print(Rule(style="dim"))
 
-        status = "pending"
+        if cached and output_format != "json":
+            try:
+                created_dt = datetime.fromisoformat(data["created_at"])
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                age_min = int(
+                    (datetime.now(timezone.utc) - created_dt).total_seconds() // 60
+                )
+                out.print(
+                    f"[dim]Using recent result from {age_min} minute{'s' if age_min != 1 else ''} ago "
+                    f"(pass --force to re-run)[/dim]\n"
+                )
+            except Exception:
+                out.print("[dim]Using recent cached result (pass --force to re-run)[/dim]\n")
+
+        status = "complete" if cached else "pending"
         report_data: dict[str, Any] = {}
+
+        def _get_score(rep: dict[str, Any]) -> int | float | None:
+            score = rep.get("exposure_score")
+            if score is None:
+                summary = rep.get("summary")
+                if isinstance(summary, dict):
+                    score = summary.get("exposure_score")
+            if isinstance(score, (int, float)):
+                return score
+            return None
+
+        def _get_risk(rep: dict[str, Any]) -> str:
+            risk = rep.get("risk_level")
+            if risk is None:
+                summary = rep.get("summary")
+                if isinstance(summary, dict):
+                    risk = summary.get("risk_level")
+            return str(risk) if risk is not None else "unknown"
 
         def generate_progress_table(rep: dict[str, Any]) -> Table:
             table = Table(title="Module Progress", box=None)
             table.add_column("Module", style="cyan")
             table.add_column("Status", justify="right")
+            table.add_column("Time", justify="right", style="dim")
             for run in rep.get("module_runs", []):
                 mod_name = run.get("module_name", "Unknown")
                 mod_status = run.get("status", "unknown")
                 color = get_status_color(mod_status)
-                table.add_row(mod_name, f"[{color}]{mod_status.upper()}[/]")
+                duration = _format_duration(run)
+                table.add_row(mod_name, f"[{color}]{mod_status.upper()}[/]", duration)
             return table
 
-        if output_format != "json":
-            with Live(generate_progress_table({}), console=out, refresh_per_second=4) as live:
-                while status not in ("complete", "failed"):
-                    await asyncio.sleep(2)
-                    with contextlib.suppress(Exception):
-                        resp = await client.get(f"/api/report/{inv_id}")
-                        resp.raise_for_status()
-                        report_data = resp.json()
-                        status = report_data.get("status", status)
-                        live.update(generate_progress_table(report_data))
+        def render_summary(rep: dict[str, Any]) -> None:
+            score = _get_score(rep)
+            risk = _get_risk(rep)
+            findings_count = len(rep.get("findings", []))
+            score_str = str(score) if score is not None else "N/A"
+            risk_color = get_risk_color(risk)
+            score_color = _score_color(score if isinstance(score, int) else None)
+            summary = (
+                f" [bold]Score:[/] [{score_color}]{score_str}[/]  │  "
+                f"[bold]Risk:[/] [{risk_color}]{risk.upper()}[/]  │  "
+                f"[bold]Hits:[/] {findings_count} "
+            )
+            out.print(Panel(summary, border_style=score_color))
+            out.print()
+
+        def render_findings(rep: dict[str, Any]) -> None:
+            findings_by_module = rep.get("findings_by_module", {})
+            if findings_by_module:
+                for module_name, findings in findings_by_module.items():
+                    out.print(Rule(f"{_normalize_module_name(module_name)}  ({len(findings)} hits)", style="cyan"))
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        confidence = str(finding.get("confidence", "")).lower()
+                        severity = str(finding.get("severity", "")).lower()
+                        symbol = "✓"
+                        style = "green"
+                        if confidence == "low":
+                            symbol = "~"
+                            style = "dim"
+                        if severity == "critical":
+                            symbol = "⚠"
+                            style = "red"
+                        platform, detail = _extract_finding_line(finding, module_name)
+                        platform_label = f"{platform[:20]:<20}"
+                        detail_text = detail if detail else "account found"
+                        out.print(f"  [{style}]{symbol}[/{style}] {platform_label} {detail_text}")
+                        metadata = []
+                        for key in ("display_name", "username", "breach_name", "severity"):
+                            value = finding.get(key)
+                            if value:
+                                metadata.append(f"{key}: {value}")
+                        if confidence == "low":
+                            metadata.append("low confidence")
+                        if metadata:
+                            out.print(f"    [dim][{' · '.join(metadata)}][/dim]")
+                    out.print()
+            else:
+                out.print("[dim]No findings to display.[/]")
+
+        def render_skipped(rep: dict[str, Any]) -> None:
+            module_runs = rep.get("module_runs", [])
+            skipped_modules = [
+                run.get("module_name", "unknown")
+                for run in module_runs
+                if str(run.get("status", "")).lower() == "skipped"
+            ]
+            skipped_key_modules = [
+                run.get("module_name", "unknown")
+                for run in module_runs
+                if str(run.get("status", "")).lower() == "skipped"
+                and "api key" in str(run.get("error", "")).lower()
+            ]
+
+            if skipped_modules:
+                out.print(Rule("BREACHES", style="dim"))
+                for module in skipped_modules:
+                    out.print(f"  [dim]— {_normalize_module_name(module)}: skipped[/dim]")
+                out.print()
+
+            out.print("[dim]Legend: ✓ confirmed  ~ low confidence  — skipped[/dim]")
+            if skipped_key_modules:
+                keyless = ", ".join(skipped_key_modules)
+                out.print(f"[dim]Skipped (no API key): {keyless}[/dim]")
+            out.print(f"[dim]💾 Save report: mailaccess investigate {email} -o report.pdf[/dim]")
+
+        if cached:
+            try:
+                resp = await client.get(f"/api/report/{inv_id}", timeout=30)
+                resp.raise_for_status()
+                report_data = resp.json()
+                status = report_data.get("status", status)
+            except Exception:
+                # Fallback to normal polling if immediate report fetch fails.
+                status = "pending"
+
+        _MAX_POLL_ATTEMPTS = 60  # 60 × 2 s = 120 s hard timeout
+
+        if output_format != "json" and not cached:
+            ws_base = base_url.replace("https://", "wss://").replace("http://", "ws://")
+            ws_url = f"{ws_base}/ws/investigate/{inv_id}"
+            err_console.print(f"[dim]Connecting: {ws_url}[/dim]")
+            _ws_modules: dict[str, dict[str, Any]] = {}
+            _live = Live(generate_progress_table({}), console=out, refresh_per_second=4)
+            try:
+                _live.start()
+                try:
+                    async with websockets.connect(ws_url, open_timeout=10) as ws:
+                        _deadline = asyncio.get_running_loop().time() + 360
+                        while True:
+                            remaining = _deadline - asyncio.get_running_loop().time()
+                            if remaining <= 0:
+                                err_console.print("[yellow]WS deadline reached (360 s), falling back to polling[/yellow]")
+                                break
+                            try:
+                                raw = await asyncio.wait_for(ws.recv(), timeout=min(remaining, 150))
+                            except asyncio.TimeoutError:
+                                err_console.print("[yellow]WS receive timed out (150 s), falling back to polling[/yellow]")
+                                break
+                            event = json.loads(raw)
+                            ev_type = event.get("type")
+                            if ev_type == "module_start":
+                                mod = event.get("module", "unknown")
+                                _ws_modules[mod] = {"module_name": mod, "status": "running", "started_at": event.get("timestamp")}
+                            elif ev_type in ("module_result", "module_error"):
+                                mod = event.get("module", "unknown")
+                                if mod not in _ws_modules:
+                                    _ws_modules[mod] = {"module_name": mod}
+                                _ws_modules[mod]["status"] = event.get("status", "complete")
+                                _ws_modules[mod]["completed_at"] = datetime.now(timezone.utc).isoformat()
+                            elif ev_type == "investigation_complete":
+                                status = "complete"
+                            if _ws_modules:
+                                _live.update(generate_progress_table({"module_runs": list(_ws_modules.values())}))
+                            if status == "complete":
+                                with contextlib.suppress(Exception):
+                                    resp = await client.get(f"/api/report/{inv_id}", timeout=30)
+                                    resp.raise_for_status()
+                                    report_data = resp.json()
+                                break
+                except Exception as _ws_exc:
+                    err_console.print(f"[yellow]WS unavailable, falling back to polling ({_ws_exc})[/yellow]")
+                    err_console.print(f"[dim]Tried: {ws_url}[/dim]")
+                    err_console.print("[dim]Is the backend running?[/dim]")
+                if status not in ("complete", "failed"):
+                    _attempts = 0
+                    while status not in ("complete", "failed"):
+                        if _attempts >= _MAX_POLL_ATTEMPTS:
+                            err_console.print("[red]Timed out waiting for investigation to complete (120 s)[/red]")
+                            sys.exit(1)
+                        await asyncio.sleep(2)
+                        _attempts += 1
+                        with contextlib.suppress(Exception):
+                            resp = await client.get(f"/api/report/{inv_id}")
+                            resp.raise_for_status()
+                            report_data = resp.json()
+                            status = report_data.get("status", status)
+                            _live.update(generate_progress_table(report_data))
+            finally:
+                _live.stop()
         else:
+            _attempts = 0
             while status not in ("complete", "failed"):
+                if _attempts >= _MAX_POLL_ATTEMPTS:
+                    err_console.print("[red]Timed out waiting for investigation to complete (120 s)[/red]")
+                    sys.exit(1)
                 await asyncio.sleep(2)
+                _attempts += 1
                 with contextlib.suppress(Exception):
                     resp = await client.get(f"/api/report/{inv_id}")
                     resp.raise_for_status()
                     report_data = resp.json()
                     status = report_data.get("status", status)
+
+        if output_format != "json" and cached:
+            module_runs = report_data.get("module_runs", [])
+            statuses = [
+                f"{run.get('module_name', 'unknown')}:{str(run.get('status', 'unknown')).upper()}"
+                for run in module_runs
+            ]
+            if statuses:
+                out.print(f"[dim]Modules: {', '.join(statuses)}[/dim]")
+
+        # If the WS/poll path finished without a report, make one final attempt.
+        if not report_data:
+            try:
+                resp = await client.get(f"/api/report/{inv_id}", timeout=30)
+                resp.raise_for_status()
+                report_data = resp.json()
+            except Exception as _e:
+                out.print(f"[red]Error:[/] Could not fetch report: {_e}")
+                raise typer.Exit(1)
+        if not report_data:
+            out.print("[red]Error:[/] Report is empty — investigation may have failed.")
+            raise typer.Exit(1)
 
         # Export to file if requested
         if output_file:
@@ -364,38 +664,9 @@ async def _investigate(
             return
 
         out.print("\n[bold green]Investigation Complete[/]\n")
-
-        summary_table = Table(title="Summary")
-        summary_table.add_column("Exposure Score", justify="center")
-        summary_table.add_column("Risk Level", justify="center")
-        summary_table.add_column("Total Findings", justify="center")
-
-        score = report_data.get("exposure_score")
-        risk = report_data.get("risk_level", "unknown")
-        findings_count = len(report_data.get("findings", []))
-        score_str = str(score) if score is not None else "N/A"
-        risk_color = get_risk_color(risk)
-
-        summary_table.add_row(
-            score_str,
-            f"[{risk_color}]{risk.upper()}[/]",
-            str(findings_count),
-        )
-        out.print(summary_table)
-        out.print()
-
-        findings_by_module = report_data.get("findings_by_module", {})
-        if not findings_by_module:
-            out.print("[dim]No findings to display.[/]")
-            return
-
-        for module_name, findings in findings_by_module.items():
-            content = ""
-            for i, f in enumerate(findings, 1):
-                finding_str = json.dumps(f, indent=2)
-                content += f"[bold]{i}.[/] {finding_str}\n"
-            out.print(Panel(content.strip(), title=f"[cyan]{module_name}[/]", border_style="cyan"))
-            out.print()
+        render_summary(report_data)
+        render_findings(report_data)
+        render_skipped(report_data)
 
 
 @app.command()
@@ -413,9 +684,12 @@ def investigate(
     output_file: Optional[str] = typer.Option(
         None, "--output", "-o", help="Save report to file (.json .csv .md .pdf .stix .mtgx)"
     ),
+    force: bool = typer.Option(
+        False, "--force", help="Bypass recent-result cache and re-run all modules."
+    ),
 ) -> None:
     """Run a full OSINT investigation against an email address."""
-    asyncio.run(_investigate(email, output_format, modules, timeout, output_file))
+    asyncio.run(_investigate(email, output_format, modules, timeout, output_file, force))
 
 
 # ── History ───────────────────────────────────────────────────────────────────

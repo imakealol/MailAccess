@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
+import time
+from pathlib import Path
 from typing import Any
 
 from holehe.core import __version__ as _HOLEHE_VERSION
@@ -14,6 +18,51 @@ from .base import BaseModule, ModuleResult, ModuleStatus
 
 _LOG = logging.getLogger(__name__)
 _BATCH_SIZE = 20
+
+_CACHE_DIR = Path("data/cache/account_discovery")
+_CACHE_TTL = 21_600  # 6 hours
+
+
+def _cache_path(email: str) -> Path:
+    digest = hashlib.md5(email.strip().lower().encode("utf-8")).hexdigest()
+    return _CACHE_DIR / f"{digest}.json"
+
+
+def _read_cache(email: str) -> ModuleResult | None:
+    path = _cache_path(email)
+    if not path.exists():
+        return None
+    age = time.time() - path.stat().st_mtime
+    if age >= _CACHE_TTL:
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return ModuleResult(
+            status=ModuleStatus(payload["status"]),
+            findings=payload.get("findings", []),
+            metadata={**(payload.get("metadata") or {}), "from_cache": True},
+            errors=payload.get("errors", []),
+        )
+    except Exception as exc:
+        _LOG.debug("account_discovery: cache read failed (%s) — refreshing", exc)
+        return None
+
+
+def _write_cache(email: str, result: ModuleResult) -> None:
+    if result.status not in (ModuleStatus.SUCCESS, ModuleStatus.PARTIAL):
+        return
+    path = _cache_path(email)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "status": result.status.value,
+        "findings": result.findings,
+        "metadata": result.metadata,
+        "errors": result.errors,
+    }
+    try:
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception as exc:
+        _LOG.debug("account_discovery: cache write failed (%s)", exc)
 
 
 def _make_finding(result: dict[str, Any]) -> dict[str, Any]:
@@ -53,6 +102,12 @@ class AccountDiscoveryModule(BaseModule):
                 status=ModuleStatus.SKIPPED,
                 errors=["Set ENABLE_ACCOUNT_DISCOVERY=true to run this module"],
             )
+
+        cached = _read_cache(email)
+        if cached is not None:
+            _LOG.debug("account_discovery: using cache for %s", email)
+            return cached
+        _LOG.debug("account_discovery: probing fresh for %s", email)
 
         funcs = get_functions(import_submodules("holehe"))
         findings: list[dict[str, Any]] = []
@@ -97,7 +152,7 @@ class AccountDiscoveryModule(BaseModule):
         if hard_errors:
             status = ModuleStatus.PARTIAL if findings else ModuleStatus.FAILED
 
-        return ModuleResult(
+        result = ModuleResult(
             status=status,
             findings=findings,
             metadata={
@@ -109,3 +164,5 @@ class AccountDiscoveryModule(BaseModule):
             },
             errors=errors,
         )
+        _write_cache(email, result)
+        return result

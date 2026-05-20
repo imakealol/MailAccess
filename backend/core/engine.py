@@ -43,10 +43,35 @@ def _module_weight(module_name: str) -> int:
     return _WEIGHT_META
 
 
+def _finding_sort_key(finding) -> tuple[str, str, str]:
+    if not isinstance(finding, dict):
+        return ("", "", str(finding))
+    platform = str(finding.get("platform", ""))
+    profile_url = str(finding.get("profile_url", ""))
+    source = str(finding.get("source", ""))
+    return (platform, profile_url, source)
+
+
+def _sort_collected(results: dict[str, ModuleResult]) -> dict[str, ModuleResult]:
+    """Return a new dict with module keys sorted and findings within each module sorted.
+
+    Determinism guard: async completion order varies between runs, which made the
+    insertion order of `results` (and finding lists inside each module) depend on
+    network race conditions. Sorting both gives identical inputs → identical score.
+    """
+    ordered: dict[str, ModuleResult] = {}
+    for name in sorted(results.keys()):
+        result = results[name]
+        result.findings = sorted(result.findings, key=_finding_sort_key)
+        ordered[name] = result
+    return ordered
+
+
 def _compute_exposure_score(results: dict[str, ModuleResult]) -> int:
     """Sum weighted finding counts across all successful modules, clamped to [0, 100]."""
     total = 0
-    for name, result in results.items():
+    for name in sorted(results.keys()):
+        result = results[name]
         if result.status in (ModuleStatus.SUCCESS, ModuleStatus.PARTIAL):
             total += len(result.findings) * _module_weight(name)
     return min(total, 100)
@@ -273,16 +298,25 @@ class InvestigationEngine:
             except Exception:
                 graph_data = None
 
+            # Sort collected once, after every module has reported, so the
+            # exposure score and persisted finding order are independent of
+            # async completion order.
+            # NOTE: use a separate variable to avoid shadowing the closed-over
+            # `collected` in _run_and_persist — assigning to `collected` here
+            # would make Python treat it as a local throughout the function,
+            # causing UnboundLocalError on every earlier reference.
+            _final = _sort_collected(collected)
+
             # Persist before sentinel so consumers see the final score in the DB.
             self.status = InvestigationStatus.COMPLETE
             try:
-                await self._persist(investigation_id, collected, started_at, graph_data)
-                
+                await self._persist(investigation_id, _final, started_at, graph_data)
+
                 # Dispatch webhooks if configured
                 try:
                     from ..integrations.webhooks import WebhookDispatcher
-                    score = _compute_exposure_score(collected)
-                    await WebhookDispatcher().dispatch(email, score, collected)
+                    score = _compute_exposure_score(_final)
+                    await WebhookDispatcher().dispatch(email, score, _final)
 
                     from ..config import settings
                     if settings.integration_webhook_url:

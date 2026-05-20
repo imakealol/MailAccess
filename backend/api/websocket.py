@@ -44,7 +44,15 @@ async def ws_investigate(investigation_id: str, websocket: WebSocket) -> None:
     """
     await websocket.accept()
 
-    queue = queue_registry.pop(investigation_id)
+    # The queue is registered before the HTTP 202 response is sent, but poll
+    # briefly in case of any scheduling delay (e.g. server under load).
+    queue = None
+    for _ in range(20):  # up to 10 s (20 × 0.5 s)
+        queue = queue_registry.pop(investigation_id)
+        if queue is not None:
+            break
+        await asyncio.sleep(0.5)
+
     if queue is None:
         await websocket.send_json(
             {"type": "error", "error": "investigation not found or already streaming"}
@@ -68,6 +76,8 @@ async def ws_investigate(investigation_id: str, websocket: WebSocket) -> None:
                         "risk_level": _risk_level(score),
                     }
                 )
+                # Give the client 5 s to drain the frame before we close.
+                await asyncio.sleep(5)
                 break
 
             if item.type == "module_start":

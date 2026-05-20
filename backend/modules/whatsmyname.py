@@ -25,11 +25,19 @@ _TIMEOUT = 6.0
 
 
 async def _load_wmn_data() -> dict[str, Any]:
-    """Return parsed wmn-data.json, refreshing the local cache when stale."""
+    """Return parsed wmn-data.json, refreshing the local cache when stale.
+
+    Cache check runs before any network call. Debug log line records which
+    branch was taken so back-to-back runs are easy to verify.
+    """
     if _CACHE_PATH.exists():
         age = time.time() - _CACHE_PATH.stat().st_mtime
         if age < _CACHE_TTL:
+            _LOG.debug("WMN: using cache (age=%.1fs, ttl=%ds)", age, _CACHE_TTL)
             return json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+        _LOG.debug("WMN: cache stale (age=%.1fs >= ttl=%ds) — fetching fresh data", age, _CACHE_TTL)
+    else:
+        _LOG.debug("WMN: no cache present — fetching fresh data")
 
     _LOG.info("Fetching fresh wmn-data.json from GitHub")
     async with build_client(timeout=30.0) as client:

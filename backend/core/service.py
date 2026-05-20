@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,24 +59,56 @@ class InvestigationService:
     Intended to be instantiated per-request with an injected AsyncSession::
 
         service = InvestigationService(session)
-        investigation_id, created_at, queue = await service.create_investigation("user@example.com")
+        investigation_id, created_at, queue, cached = await service.create_investigation("user@example.com")
     """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _find_recent_complete(self, email: str) -> Investigation | None:
+        """Return the most recent COMPLETE investigation for `email` within the
+        configured cache window, or None if none qualifies."""
+        window = timedelta(minutes=settings.investigation_cache_window_minutes)
+        cutoff = datetime.now(timezone.utc) - window
+        result = await self._session.execute(
+            select(Investigation)
+            .where(
+                Investigation.email == email,
+                Investigation.status == InvestigationStatus.COMPLETE,
+                Investigation.created_at >= cutoff,
+            )
+            .order_by(Investigation.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def create_investigation(
         self,
         email: str,
         module_names: list[str] | None = None,
-    ) -> tuple[str, datetime, asyncio.Queue]:
+        force: bool = False,
+    ) -> tuple[str, datetime, asyncio.Queue | None, bool]:
         """
         Persist a new Investigation (PENDING), launch the engine in the
-        background, and return (id, created_at, queue) immediately.
+        background, and return (id, created_at, queue, cached).
+
+        When `enable_investigation_cache` is set and a COMPLETE investigation
+        for the same email exists within the cache window, returns that
+        investigation's id with `cached=True` and `queue=None` — no new
+        engine run is started. Pass `force=True` to bypass the cache.
 
         The caller is responsible for storing the queue in the registry so
-        WebSocket handlers can consume it.
+        WebSocket handlers can consume it (skip when cached=True).
         """
+        if (
+            not force
+            and settings.enable_investigation_cache
+            and module_names is None
+        ):
+            recent = await self._find_recent_complete(email)
+            if recent is not None:
+                return recent.id, recent.created_at, None, True
+
         inv = Investigation(email=email, status=InvestigationStatus.PENDING)
         self._session.add(inv)
         await self._session.flush()
@@ -89,7 +121,7 @@ class InvestigationService:
             max_concurrency=settings.max_concurrent_modules,
         )
         queue = await engine.investigate(email, investigation_id, module_names)
-        return investigation_id, created_at, queue
+        return investigation_id, created_at, queue, False
 
     async def get_investigation(self, investigation_id: str) -> dict | None:
         """Return the full investigation with all findings and module runs."""

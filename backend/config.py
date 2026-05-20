@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     # Messaging hints: Telegram username checks during primary gather
     enable_messaging_hints: bool = True
 
+    # Investigation cache: when an identical email is investigated within
+    # `investigation_cache_window_minutes`, reuse the most recent COMPLETE
+    # result instead of running modules again. Avoids rate-limit-driven
+    # variance between back-to-back runs. CLI/API callers can force a fresh
+    # run by passing `force=true`.
+    enable_investigation_cache: bool = True
+    investigation_cache_window_minutes: int = 30
+
     # Webhooks
     slack_webhook_url: str | None = None
     discord_webhook_url: str | None = None

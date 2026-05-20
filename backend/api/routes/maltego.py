@@ -43,8 +43,9 @@ async def email_investigate(
 
     service = InvestigationService(session)
     try:
-        investigation_id, _created_at, queue = await service.create_investigation(email)
-        queue_registry.put(investigation_id, queue)
+        investigation_id, _created_at, queue, cached = await service.create_investigation(email)
+        if not cached and queue is not None:
+            queue_registry.put(investigation_id, queue)
     except Exception as exc:
         logger.exception("Failed to start investigation for %s", email)
         return Response(
@@ -53,22 +54,24 @@ async def email_investigate(
         )
 
     # Drain the event queue until the engine pushes the None sentinel or we hit 55s.
+    # When `cached` is true we reused a finished investigation — no queue to drain.
     partial = False
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + _TRANSFORM_TIMEOUT
+    if not cached and queue is not None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _TRANSFORM_TIMEOUT
 
-    while True:
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            partial = True
-            break
-        try:
-            event = await asyncio.wait_for(queue.get(), timeout=remaining)
-            if event is None:  # completion sentinel from the engine
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                partial = True
                 break
-        except asyncio.TimeoutError:
-            partial = True
-            break
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=remaining)
+                if event is None:  # completion sentinel from the engine
+                    break
+            except asyncio.TimeoutError:
+                partial = True
+                break
 
     data = await service.get_investigation(investigation_id)
     if data is None:

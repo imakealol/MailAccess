@@ -27,12 +27,14 @@ async def _cleanup_queue(investigation_id: str, delay: float = 300.0) -> None:
 class InvestigateRequest(BaseModel):
     email: str
     modules: list[str] | None = None
+    force: bool = False
 
 
 class InvestigateResponse(BaseModel):
     id: str
     status: str
     created_at: str
+    cached: bool = False
 
 
 class InvestigationSummary(BaseModel):
@@ -62,18 +64,24 @@ async def start_investigation(
     body: InvestigateRequest,
     session: AsyncSession = Depends(get_db),
 ) -> InvestigateResponse:
-    """Create a new investigation and kick off the engine in the background."""
+    """Create a new investigation and kick off the engine in the background.
+
+    Returns `cached=true` when a recent COMPLETE investigation for the same
+    email is reused; in that case no engine run is started.
+    """
     service = InvestigationService(session)
-    investigation_id, created_at, queue = await service.create_investigation(
-        body.email, body.modules
+    investigation_id, created_at, queue, cached = await service.create_investigation(
+        body.email, body.modules, force=body.force,
     )
-    queue_registry.put(investigation_id, queue)
-    # Release the queue from memory after 5 minutes if no WS consumer arrives.
-    asyncio.create_task(_cleanup_queue(investigation_id, delay=300.0))
+    if not cached and queue is not None:
+        queue_registry.put(investigation_id, queue)
+        # Release the queue from memory after 5 minutes if no WS consumer arrives.
+        asyncio.create_task(_cleanup_queue(investigation_id, delay=300.0))
     return InvestigateResponse(
         id=investigation_id,
-        status="pending",
+        status="complete" if cached else "pending",
         created_at=created_at.isoformat(),
+        cached=cached,
     )
 
 

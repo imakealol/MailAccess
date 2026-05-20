@@ -13,6 +13,16 @@ _MAX_TELEGRAM_CHECKS = 3
 _DISPLAY_KEYS = frozenset({"display_name", "name", "full_name", "real_name"})
 _USERNAME_KEYS = frozenset({"username", "login", "user", "handle"})
 
+# Generic Telegram landing-page titles that come back when {username} doesn't
+# resolve to a real channel/user. Lowercased for case-insensitive comparison.
+_TELEGRAM_GENERIC_TITLES = frozenset({
+    "telegram",
+    "telegram messenger",
+    "a new era of messaging",
+    "telegram – a new era of messaging",
+    "telegram - a new era of messaging",
+})
+
 
 def _slug_variants(display_name: str) -> list[str]:
     s = display_name.strip().lower()
@@ -60,8 +70,9 @@ async def _check_telegram_username(
         if resp.status_code != 200:
             return None
         body = resp.text
-        if "tgme_page_title" not in body and "og:title" not in body:
+        if "tgme_page_title" not in body:
             return None
+
         display_name = ""
         photo_url = ""
         title_m = re.search(r'property="og:title"\s+content="([^"]+)"', body)
@@ -70,6 +81,23 @@ async def _check_telegram_username(
         img_m = re.search(r'property="og:image"\s+content="([^"]+)"', body)
         if img_m:
             photo_url = unescape(img_m.group(1))
+
+        page_title = ""
+        page_title_m = re.search(r"<title[^>]*>([^<]+)</title>", body, re.IGNORECASE)
+        if page_title_m:
+            page_title = unescape(page_title_m.group(1)).strip()
+
+        # t.me/{username} returns Telegram's own homepage meta tags when the
+        # username does not exist. Reject any response whose title is generic
+        # branding or does not mention the username we asked about.
+        u_lower = username.lower()
+        title_lower = display_name.lower().strip()
+        page_lower = page_title.lower()
+        if title_lower in _TELEGRAM_GENERIC_TITLES or page_lower in _TELEGRAM_GENERIC_TITLES:
+            return None
+        if u_lower not in title_lower and u_lower not in page_lower:
+            return None
+
         return {
             "platform": "telegram",
             "profile_url": url,
