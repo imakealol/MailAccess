@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](docker-compose.yml)
-[![PyPI](https://img.shields.io/pypi/v/mailaccess)](https://pypi.org/project/mailaccess/)
+[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.3.0&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mailaccess)](https://pypi.org/project/mailaccess/)
 
 Self-hostable OSINT platform for investigating email addresses. Fan out across breach databases, social networks, DNS records, and the open web — get back a unified exposure score and structured findings you can export or pipe into Maltego.
@@ -49,6 +49,10 @@ mailaccess modules
 
 ## What It Does
 
+- **Identity graph** — cross-platform correlation of accounts, usernames, and signals from each investigation
+- **Phone number recovery** — pipeline to surface and validate numbers tied to the target
+- **Telegram / WhatsApp hints** — lightweight messaging-app footprint checks alongside other modules
+- **YAML-driven platform system** — social-style checks defined in `backend/platforms/`; community extensible without new Python for each site
 - Concurrent module execution — all modules run in parallel, results stream as they arrive
 - WebSocket streaming — partial results arrive in real time without polling
 - REST API + web UI + CLI — use whatever interface fits your workflow
@@ -61,19 +65,46 @@ mailaccess modules
 
 ## Modules
 
-| Module | What it checks | Requires key |
-|--------|---------------|:------------:|
-| `hibp` | Known data breaches via the HIBP v3 API | Yes — `HIBP_API_KEY` |
-| `emailrep` | Reputation score, risk flags, linked profiles (EmailRep.io) | No (key optional) |
-| `gravatar` | Gravatar and Libravatar profile, linked accounts | No |
-| `google_dork` | Google dork queries via SerpAPI — LinkedIn, GitHub, Pastebin, open web | Yes — `SERPAPI_KEY` |
-| `domain_intel` | WHOIS, SPF / DMARC / MX, website presence, Shodan subdomains | No (Shodan optional) |
-| `social` | Account existence on 13 platforms (GitHub, Discord, Spotify, Skype, and more) | No |
-| `account_discovery` | Account probing across 120+ platforms via Holehe (opt-in) | No |
-| `whatsmyname` | Username enumeration across 800+ platforms via WhatsMyName dataset (opt-in) | No |
-| `hudson_rock` | Infostealer credential log lookup via Hudson Rock Cavalier API | No |
-| `permutation_discovery` | Generates email permutations from recovered name, probes with HIBP + Hudson Rock (opt-in) | No |
-| `ghunt` | Deep Google account intel: GAIA ID, YouTube, Maps reviews, Drive (Gmail only, opt-in) | Yes — `GHUNT_CREDS_PATH` |
+| Module | Coverage | Key Required | Opt-in |
+|--------|----------|--------------|--------|
+| gravatar | Profile hash lookup | No | No |
+| hibp | Breach check | Yes | No |
+| emailrep | Reputation + blacklist | No | No |
+| hudson_rock | Infostealer logs (free) | No | No |
+| google_dork | 5 automated dorks | Yes (SerpAPI) | No |
+| domain_intel | WHOIS + DNS + Shodan | No (Shodan optional) | No |
+| social | 13 platforms via YAML | No | No |
+| account_discovery | Holehe 120+ platforms | No | Yes |
+| user_scanner | 205+ platform vectors | No | Yes |
+| whatsmyname | 700+ platforms | No | Yes |
+| breachdirectory | 2nd breach source | Yes | No |
+| username_pivot | WMN via recovered usernames | No | Yes |
+| permutation_discovery | 60 email variants | No | Yes |
+| phone_intel | Phone validation + WA/TG hints | No | No |
+| messaging_hints | Telegram/WhatsApp username check | No | No |
+| ghunt | Gmail deep intel | No (setup required) | Yes |
+
+> 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
+
+## Identity Graph
+
+Every investigation generates a cross-platform identity graph linking accounts by shared usernames, photos, display names, and breach data. View at:
+
+`/investigation/:id/graph`
+
+Export as Neo4j Cypher via `GET /api/report/{id}/graph`
+
+## Adding a Platform
+
+No Python required. Drop a YAML file in `backend/platforms/`:
+
+```bash
+cp backend/platforms/TEMPLATE.yaml backend/platforms/mysite.yaml
+```
+
+Edit fields, submit PR.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for full guide.
 
 ## Export Formats
 
@@ -143,6 +174,36 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | [Contributing](CONTRIBUTING.md) | Adding modules, adding exporters, code style, PR checklist |
 | [PyPI](https://pypi.org/project/mailaccess/) | `pip install mailaccess` |
 | [GitHub](https://github.com/YOUR_USERNAME/mailaccess) | Source code, issues, releases |
+
+## Changelog
+
+### 0.3.0
+
+- Identity graph with D3 visualization
+- Phone number recovery + WhatsApp/Telegram hints
+- YAML-driven platform system (community extensible)
+- user-scanner integration (205+ vectors)
+- Username pivot via WhatsMyName
+- BreachDirectory as second breach source
+- Permutation discovery for related emails
+
+### 0.2.0
+
+- ASCII banner on CLI launch
+- API key management (mailaccess keys list/set/unset)
+- `--output` / `-o` flag for direct file export
+- mailaccess modules and mailaccess commands
+- pipx install support
+
+### 0.1.0
+
+- Initial release
+- 800+ platform coverage (WMN + Holehe + hardcoded)
+- 6 export formats (JSON CSV Markdown PDF STIX Maltego)
+- Maltego local transform server
+- Slack + Discord + webhook integrations
+- Docker Compose self-hosting
+- Full REST API + WebSocket streaming
 
 ## License
 
