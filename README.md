@@ -49,7 +49,7 @@ mailaccess modules
 mailaccess doctor                               # coming soon
 ```
 
-<!-- screenshot -->
+![Investigation demo](public/investigation.gif)
 
 ## What It Does
 
@@ -196,6 +196,10 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | `SLACK_WEBHOOK_URL` | Webhooks | https://api.slack.com/messaging/webhooks | No |
 | `DISCORD_WEBHOOK_URL` | Webhooks | Discord server settings | No |
 
+## Troubleshooting
+
+![Troubleshooting demo](public/troubleshoot.gif)
+
 ## Links
 
 | | |
@@ -208,69 +212,6 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | [Contributing](CONTRIBUTING.md) | Adding modules, adding exporters, code style, PR checklist |
 | [PyPI](https://pypi.org/project/mailaccess/) | `pip install mailaccess` |
 | [GitHub](https://github.com/YOUR_USERNAME/mailaccess) | Source code, issues, releases |
-
-## Changelog
-
-### 0.3.7
-
-- Phone extractor false positive fix
-  (IP addresses no longer parsed as phone numbers)
-- DNS findings show actual values
-  (MX provider, SPF record, DMARC policy, IP, NS)
-- Skipped module reasons are self-explanatory
-  (free provider, key name, enable flag name)
-- Telegram false positive filter improved
-- phone_intel correctly skips when no real phone found
-
-### 0.3.4
-
-- Clean terminal output (no log noise, no duplicate tables)
-- Identity graph surfaced in CLI with confidence clusters
-- Pipeline support: stdin, jsonl output, exit codes
-- Score displayed as fraction (N/100, X/20 modules)
-- Real DNS/WHOIS implementation (no more stubs)
-- `mailaccess serve` command + auto-start on first investigate call
-- Grouped skipped modules (BREACH/RECON/OPTIONAL)
-
-### 0.3.3
-
-- Scoring overhaul, false-positive reduction, noise fixes
-
-### 0.3.2
-
-- Fix WebSocket hang, CLI output redesign, consistent findings rendering
-
-### 0.3.1
-
-- CLI fixes: keys/config subcommands, Windows UTF-8, banner version
-
-### 0.3.0
-
-- Identity graph with D3 visualization
-- Phone number recovery + WhatsApp/Telegram hints
-- YAML-driven platform system (community extensible)
-- user-scanner integration (205+ vectors)
-- Username pivot via WhatsMyName
-- BreachDirectory as second breach source
-- Permutation discovery for related emails
-
-### 0.2.0
-
-- ASCII banner on CLI launch
-- API key management (mailaccess keys list/set/unset)
-- `--output` / `-o` flag for direct file export
-- mailaccess modules and mailaccess commands
-- pipx install support
-
-### 0.1.0
-
-- Initial release
-- 800+ platform coverage (WMN + Holehe + hardcoded)
-- 6 export formats (JSON CSV Markdown PDF STIX Maltego)
-- Maltego local transform server
-- Slack + Discord + webhook integrations
-- Docker Compose self-hosting
-- Full REST API + WebSocket streaming
 
 ## License
 
