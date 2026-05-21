@@ -54,6 +54,7 @@ coverage/
 # Report outputs (never commit personal investigation data)
 report.json
 report.pdf
+.last_inv.json
 
 # Documentation
 !.env.example
