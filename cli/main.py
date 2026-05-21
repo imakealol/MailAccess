@@ -585,17 +585,31 @@ async def _investigate(
                             symbol = "⚠"
                             style = "red"
                         platform, detail = _extract_finding_line(finding, module_name)
+                        meta = finding.get("metadata", {})
+                        if "common_variations" in meta:
+                            detail = "→ " + ", ".join(meta["common_variations"])
+
                         if module_name in ("account_discovery", "user_scanner") or str(finding.get("source", "")) in ("account_discovery", "user_scanner"):
                             platform = platform.title()
                             detail_text = "[dim][email registration confirmed][/dim]"
-                        elif module_name == "social_links" or str(finding.get("source", "")) == "social_links":
-                            variations = finding.get("common_variations")
-                            if not variations and "metadata" in finding:
-                                variations = finding["metadata"].get("common_variations")
-                            if variations and isinstance(variations, list):
-                                detail_text = f"→ {', '.join(str(v) for v in variations)}"
+                        elif module_name == "dns_lookup":
+                            pt = str(finding.get("platform", ""))
+                            if pt == "dns_mx" and meta.get("mx_provider"):
+                                detail_text = f"MX: {meta.get('mx_provider')}"
+                            elif pt == "dns_spf" and meta.get("spf_record"):
+                                detail_text = f"SPF: {str(meta.get('spf_record'))[:40]}"
+                            elif pt == "dns_dmarc" and meta.get("dmarc_policy"):
+                                detail_text = f"DMARC: {meta.get('dmarc_policy')}"
+                            elif pt == "dns_a" and meta.get("ip_address"):
+                                detail_text = f"A: {meta.get('ip_address')}"
+                            elif pt == "dns_ns" and meta.get("nameservers"):
+                                ns = meta.get("nameservers")
+                                ns_val = ns[0] if isinstance(ns, list) and ns else ns
+                                detail_text = f"NS: {ns_val}"
+                            elif pt == "dns_dkim" and meta.get("selector"):
+                                detail_text = f"DKIM: selector={meta.get('selector')}"
                             else:
-                                detail_text = detail if detail else "account found"
+                                detail_text = "record found"
                         else:
                             detail_text = detail if detail else "account found"
                         
@@ -641,9 +655,14 @@ async def _investigate(
                     out.print(Rule(group_name, style="dim"))
                     for run in group_skipped:
                         m_name = run.get("module_name", "unknown")
-                        hint = key_hints.get(m_name, "see docs")
-                        if "api key" in str(run.get("error", "")).lower() and m_name not in key_hints:
-                            hint = "missing api key"
+                        errors = run.get("errors") or []
+                        hint = str(errors[0]) if errors else key_hints.get(m_name, "see docs")
+                        if "api key" in str(run.get("error", "")).lower() or "api key" in hint.lower():
+                            hint = key_hints.get(m_name, "missing api key")
+                        if m_name == "whois_lookup" and "free provider" in hint.lower():
+                            hint = "free email provider"
+                        if len(hint) > 50:
+                            hint = hint[:47] + "..."
                         out.print(f"  [dim]— {_normalize_module_name(m_name)}: skipped ({hint})[/dim]")
                     out.print()
 
@@ -652,9 +671,14 @@ async def _investigate(
                 out.print(Rule("OTHER MODULES", style="dim"))
                 for run in other_skipped:
                     m_name = run.get("module_name", "unknown")
-                    hint = key_hints.get(m_name, "see docs")
-                    if "api key" in str(run.get("error", "")).lower() and m_name not in key_hints:
-                        hint = "missing api key"
+                    errors = run.get("errors") or []
+                    hint = str(errors[0]) if errors else key_hints.get(m_name, "see docs")
+                    if "api key" in str(run.get("error", "")).lower() or "api key" in hint.lower():
+                        hint = key_hints.get(m_name, "missing api key")
+                    if m_name == "whois_lookup" and "free provider" in hint.lower():
+                        hint = "free email provider"
+                    if len(hint) > 50:
+                        hint = hint[:47] + "..."
                     out.print(f"  [dim]— {_normalize_module_name(m_name)}: skipped ({hint})[/dim]")
                 out.print()
 

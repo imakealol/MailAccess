@@ -21,6 +21,9 @@ _TELEGRAM_GENERIC_TITLES = frozenset({
     "a new era of messaging",
     "telegram – a new era of messaging",
     "telegram - a new era of messaging",
+    "join group chat on telegram",
+    "telegram group",
+    "telegram channel",
 })
 
 
@@ -82,6 +85,11 @@ async def _check_telegram_username(
         if img_m:
             photo_url = unescape(img_m.group(1))
 
+        og_url = ""
+        url_m = re.search(r'property="og:url"\s+content="([^"]+)"', body)
+        if url_m:
+            og_url = unescape(url_m.group(1))
+
         page_title = ""
         page_title_m = re.search(r"<title[^>]*>([^<]+)</title>", body, re.IGNORECASE)
         if page_title_m:
@@ -93,9 +101,17 @@ async def _check_telegram_username(
         u_lower = username.lower()
         title_lower = display_name.lower().strip()
         page_lower = page_title.lower()
+        
         if title_lower in _TELEGRAM_GENERIC_TITLES or page_lower in _TELEGRAM_GENERIC_TITLES:
             return None
-        if u_lower not in title_lower and u_lower not in page_lower:
+            
+        if "join" in title_lower or "group chat" in title_lower:
+            return None
+            
+        if og_url and og_url != url:
+            return None
+            
+        if u_lower not in title_lower:
             return None
 
         return {

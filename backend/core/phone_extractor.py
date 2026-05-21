@@ -15,9 +15,9 @@ _PHONE_KEYS = frozenset({
     "phone_number",
     "phonenumber",
     "phone_hint",
-    "registrant_phone",
-    "mobile",
     "recovery_phone",
+    "registrant_phone",
+    "contact_phone",
 })
 
 
@@ -41,6 +41,10 @@ def normalize_e164(raw: str) -> str | None:
     # Reject masked values (e.g. +1628***9574) — stripping * would produce garbage digits.
     if "*" in cleaned:
         return None
+
+    if re.match(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', cleaned):
+        return None
+
     has_plus = cleaned.startswith("+")
     digits = re.sub(r"\D", "", cleaned)
     if len(digits) < 7 or len(digits) > 15:
@@ -50,26 +54,26 @@ def normalize_e164(raw: str) -> str | None:
     return None
 
 
-def _scan_value(value: Any, found: dict[str, str]) -> None:
-    if isinstance(value, str):
-        for match in _INTL_RE.finditer(value):
-            norm = normalize_e164(match.group(0))
-            if norm:
-                found[norm] = norm
-        for match in _PHONE_RE.finditer(value):
-            norm = normalize_e164(match.group(0))
-            if norm:
-                found[norm] = norm
-    elif isinstance(value, dict):
+def _scan_value(value: Any, found: dict[str, str], current_key: str = "") -> None:
+    if isinstance(value, dict):
         for k, v in value.items():
-            if k.lower() in _PHONE_KEYS and isinstance(v, str):
-                norm = normalize_e164(v)
-                if norm:
-                    found[norm] = norm
-            _scan_value(v, found)
+            _scan_value(v, found, k)
     elif isinstance(value, list):
         for item in value:
-            _scan_value(item, found)
+            _scan_value(item, found, current_key)
+    elif isinstance(value, str):
+        if current_key.lower() in _PHONE_KEYS:
+            norm = normalize_e164(value)
+            if norm:
+                found[norm] = norm
+            for match in _INTL_RE.finditer(value):
+                norm = normalize_e164(match.group(0))
+                if norm:
+                    found[norm] = norm
+            for match in _PHONE_RE.finditer(value):
+                norm = normalize_e164(match.group(0))
+                if norm:
+                    found[norm] = norm
 
 
 def extract_phones(findings: list[dict[str, Any]]) -> list[str]:

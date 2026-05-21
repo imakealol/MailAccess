@@ -211,6 +211,17 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 
 ## Changelog
 
+### 0.3.7
+
+- Phone extractor false positive fix
+  (IP addresses no longer parsed as phone numbers)
+- DNS findings show actual values
+  (MX provider, SPF record, DMARC policy, IP, NS)
+- Skipped module reasons are self-explanatory
+  (free provider, key name, enable flag name)
+- Telegram false positive filter improved
+- phone_intel correctly skips when no real phone found
+
 ### 0.3.4
 
 - Clean terminal output (no log noise, no duplicate tables)
