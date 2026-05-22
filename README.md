@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/ma_logo.png" width="120" alt="MailAccess Logo" />
+  <img src="./public/ma_logo_github.png" width="120" alt="MailAccess Logo" />
 </p>
 
 <h1 align="center">MailAccess</h1>
