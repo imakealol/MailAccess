@@ -13,7 +13,7 @@ from ..modules.base import ModuleResult, ModuleStatus
 
 # Module categories for exposure scoring
 _INFOSTEALER_MODULES = frozenset({"hudson_rock"})
-_BREACH_MODULES = frozenset({"hibp", "breachdirectory"})
+_BREACH_MODULES = frozenset({"hibp", "breachdirectory", "breach_deep"})
 _SOCIAL_MODULES = frozenset({
     "gravatar",
     "social_links",
@@ -23,12 +23,16 @@ _SOCIAL_MODULES = frozenset({
     "account_discovery",
     "user_scanner",
     "username_pivot",
+    "email_discovery",
     "social",
 })
-_POST_PRIMARY_ONLY = frozenset({"username_pivot", "phone_intel"})
+_POST_PRIMARY_ONLY = frozenset({"username_pivot", "phone_intel", "email_discovery"})
 
 _WEIGHT_INFOSTEALER = 20  # critical: active malware compromise
 _WEIGHT_BREACH = 15       # high: credential exposure
+_MODULE_WEIGHT_OVERRIDES: dict[str, int] = {
+    "breach_deep": 18,
+}
 _WEIGHT_SOCIAL = 5        # medium: identity surface
 _WEIGHT_META = 2          # low: infrastructure / info
 
@@ -50,15 +54,23 @@ _MODULE_CAP: dict[str, int] = {
     "account_discovery": 15,
     "user_scanner":     15,
     "username_pivot":   10,
+    "email_discovery":  10,
     "social":           10,
     "social_links":      5,
     "hudson_rock":      40,
+    "breach_deep":      50,
     "hibp":             45,
     "breachdirectory":  40,
 }
 
+_MODULE_DEFAULT_TIMEOUTS: dict[str, int] = {
+    "breach_deep": 90,
+}
+
 
 def _module_weight(module_name: str) -> int:
+    if module_name in _MODULE_WEIGHT_OVERRIDES:
+        return _MODULE_WEIGHT_OVERRIDES[module_name]
     if module_name in _INFOSTEALER_MODULES:
         return _WEIGHT_INFOSTEALER
     if module_name in _BREACH_MODULES:
@@ -182,12 +194,20 @@ class InvestigationEngine:
         async def _run_one(cls) -> None:
             mod = cls()
             from ..config import settings
-            timeout = settings.module_timeout_overrides.get(mod.name, settings.module_timeout_seconds)
+            default_timeout = _MODULE_DEFAULT_TIMEOUTS.get(
+                mod.name, settings.module_timeout_seconds
+            )
+            timeout = settings.module_timeout_overrides.get(mod.name, default_timeout)
+            explicit_module = module_names is not None and mod.name in module_names
             async with semaphore:
                 await queue.put(QueueEvent(type="module_start", module_name=mod.name))
                 try:
+                    if mod.name == "breach_deep":
+                        coro = mod.run(email, force=explicit_module)
+                    else:
+                        coro = mod.run(email)
                     result = await asyncio.wait_for(
-                        mod.run(email), timeout=timeout
+                        coro, timeout=timeout
                     )
                 except asyncio.TimeoutError:
                     result = ModuleResult(
@@ -215,6 +235,7 @@ class InvestigationEngine:
             )
 
             from ..config import settings as _cfg
+            _primary_collected = dict(collected)
 
             if _cfg.enable_username_pivot:
                 from ..modules.username_pivot import UsernamePivotModule
@@ -269,6 +290,46 @@ class InvestigationEngine:
                 )
                 await queue.put(
                     QueueEvent(type=_evt, module_name=_perm.name, result=_perm_result)
+                )
+
+            if _cfg.enable_email_discovery:
+                from ..modules.email_discovery import EmailDiscoveryModule
+
+                _email_discovery = EmailDiscoveryModule()
+                _email_timeout = _cfg.module_timeout_overrides.get(
+                    _email_discovery.name, _cfg.module_timeout_seconds
+                )
+                await queue.put(
+                    QueueEvent(
+                        type="module_start", module_name=_email_discovery.name
+                    )
+                    )
+                try:
+                    _email_result = await asyncio.wait_for(
+                        _email_discovery.run(email, _primary_collected),
+                        timeout=_email_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    _email_result = ModuleResult(
+                        status=ModuleStatus.FAILED,
+                        errors=[f"timed out after {_email_timeout}s"],
+                    )
+                except Exception as _exc:
+                    _email_result = ModuleResult(
+                        status=ModuleStatus.FAILED, errors=[str(_exc)]
+                    )
+                collected[_email_discovery.name] = _email_result
+                _email_evt = (
+                    "module_error"
+                    if _email_result.status == ModuleStatus.FAILED
+                    else "module_result"
+                )
+                await queue.put(
+                    QueueEvent(
+                        type=_email_evt,
+                        module_name=_email_discovery.name,
+                        result=_email_result,
+                    )
                 )
 
             if _cfg.enable_phone_intel:

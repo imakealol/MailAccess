@@ -66,7 +66,8 @@ ENV_FILE = Path.home() / ".mailaccess" / ".env"
 
 _API_KEYS: list[tuple[str, str, str]] = [
     ("HIBP_API_KEY",        "hibp",          "haveibeenpwned.com/API"),
-    ("SERPAPI_KEY",         "google_dork",   "serpapi.com"),
+    ("SERPAPI_KEY",         "google_dork,email_discovery", "serpapi.com"),
+    ("GITHUB_TOKEN",        "github_commits", "github.com API (optional)"),
     ("SHODAN_API_KEY",      "domain_intel",  "shodan.io"),
     ("EMAILREP_API_KEY",    "emailrep",      "emailrep.io"),
     ("HUNTER_IO_API_KEY",   "hunter_io",     "hunter.io"),
@@ -78,10 +79,20 @@ _EXPORT_FORMATS = {".json", ".csv", ".md", ".pdf", ".stix", ".mtgx"}
 
 _HARDCODED_MODULES = [
     ("haveibeenpwned", "HIBP",      "HIBP_API_KEY",      "No", "Check email against known breach databases"),
+    (
+        "breach_deep",
+        "HIBP top 100",
+        "—",
+        "Yes",
+        "Probe accounts on high-severity breached domains",
+    ),
     ("hunter_io",      "Hunter.io", "HUNTER_IO_API_KEY", "No", "Find associated domain email patterns"),
     ("emailrep",       "EmailRep",  "EMAILREP_API_KEY",  "No", "Email reputation and metadata lookup"),
     ("gravatar",       "Gravatar",  "—",                 "No", "Retrieve profile photo via Gravatar"),
     ("google_dork",    "Google",    "SERPAPI_KEY",        "No", "Run targeted dork queries via SerpAPI"),
+    ("email_discovery", "Google",   "SERPAPI_KEY",        "No", "Find other emails tied to recovered real names"),
+    ("wayback",        "Wayback",   "—",                 "No", "Find historical archived pages mentioning the email"),
+    ("github_commits", "GitHub",    "GITHUB_TOKEN",       "No", "Search commit authorship history by email"),
     ("google_search",  "Google",    "—",                 "No", "General Google search for email mentions"),
     ("shodan",         "Shodan",    "SHODAN_API_KEY",    "No", "IP/domain intelligence via Shodan"),
     ("dns_lookup",     "DNS",       "—",                 "No", "DNS record enumeration for email domain"),
@@ -539,6 +550,21 @@ async def _investigate(
                 _progress_table.add_row(mod_name, f"[{color}]{mod_status.upper()}[/]", duration)
             return _progress_table
 
+        def _get_email_discovery_findings(rep: dict[str, Any]) -> list[dict[str, Any]]:
+            findings = rep.get("findings_by_module", {}).get("email_discovery", [])
+            return [f for f in findings if isinstance(f, dict)]
+
+        def _get_discovered_emails(rep: dict[str, Any]) -> list[str]:
+            emails_seen: dict[str, str] = {}
+            for finding in _get_email_discovery_findings(rep):
+                meta = finding.get("metadata", {})
+                if not isinstance(meta, dict):
+                    continue
+                discovered = meta.get("discovered_email")
+                if isinstance(discovered, str) and discovered.strip():
+                    emails_seen.setdefault(discovered.lower(), discovered.strip())
+            return [emails_seen[key] for key in sorted(emails_seen)]
+
         def render_summary(rep: dict[str, Any]) -> None:
             score = _get_score(rep)
             risk = _get_risk(rep)
@@ -569,7 +595,185 @@ async def _investigate(
         def render_findings(rep: dict[str, Any]) -> None:
             findings_by_module = rep.get("findings_by_module", {})
             if findings_by_module:
+                def _format_records(value: Any) -> str:
+                    try:
+                        count = int(value or 0)
+                    except (TypeError, ValueError):
+                        count = 0
+                    if count >= 1_000_000_000:
+                        return f"{count / 1_000_000_000:.1f}B records"
+                    if count >= 1_000_000:
+                        return f"{round(count / 1_000_000):.0f}M records"
+                    if count >= 1_000:
+                        return f"{round(count / 1_000):.0f}K records"
+                    return f"{count} records"
+
+                def _render_breach_deep(findings: list[Any]) -> None:
+                    out.print(Rule(f"BREACH DEEP  ({len(findings)} hits)", style="cyan"))
+                    total_records = 0
+                    for finding in findings:
+                        if not isinstance(finding, dict):
+                            continue
+                        meta = finding.get("metadata", {})
+                        if not isinstance(meta, dict):
+                            meta = {}
+                        severity = str(finding.get("severity", "")).lower()
+                        symbol = "⚠" if severity == "critical" else "✓"
+                        style = "red" if severity == "critical" else "yellow"
+                        platform = str(finding.get("platform") or "")
+                        pwn_count = meta.get("pwn_count", 0)
+                        with contextlib.suppress(Exception):
+                            total_records += int(pwn_count or 0)
+                        severity_label = severity.upper() if severity else "MEDIUM"
+                        classes = meta.get("data_classes") or []
+                        classes_text = ", ".join(str(c) for c in classes)
+                        out.print(
+                            f"  [{style}]{symbol}[/{style}] {platform[:20]:<20} "
+                            f"[{style}]{severity_label:<8}[/{style}] {_format_records(pwn_count)}"
+                        )
+                        if classes_text:
+                            out.print(f"    [dim][{classes_text}][/dim]")
+                    out.print()
+                    if findings:
+                        out.print(
+                            f"  [dim]~{_format_records(total_records)} across {len(findings)} "
+                            "breaches potentially include this email's credentials[/dim]"
+                        )
+                        out.print()
+
+                def _render_email_discovery(findings: list[Any]) -> None:
+                    usable = [f for f in findings if isinstance(f, dict)]
+                    out.print(Rule(f"EMAIL DISCOVERY  ({len(usable)} found)", style="cyan"))
+                    source_names: list[str] = []
+                    for finding in usable:
+                        meta = finding.get("metadata", {})
+                        if not isinstance(meta, dict):
+                            meta = {}
+                        discovered = str(meta.get("discovered_email") or "").strip()
+                        if not discovered:
+                            continue
+                        source_name = str(meta.get("source_name") or "").strip()
+                        if source_name and source_name not in source_names:
+                            source_names.append(source_name)
+                        source_url = str(meta.get("source_url") or finding.get("profile_url") or "")
+                        snippet = str(meta.get("snippet") or "").strip()
+                        out.print(f"  [green]âœ“[/green] {discovered}")
+                        if source_url:
+                            out.print(f"    [dim]found at:[/dim] {_display_url(source_url)}")
+                        if snippet:
+                            out.print(f"    [dim]context:[/dim] \"{snippet}\"")
+                        out.print()
+                    if source_names:
+                        names_text = ", ".join(f'"{name}"' for name in source_names)
+                        out.print(f"  [dim]Discovered via name: {names_text}[/dim]")
+                        out.print()
+
+                def _module_meta(module_name: str) -> dict[str, Any]:
+                    table = rep.get("metadata_table", {})
+                    if isinstance(table, dict) and isinstance(table.get(module_name), dict):
+                        return table[module_name]
+                    for run in rep.get("module_runs", []):
+                        if not isinstance(run, dict):
+                            continue
+                        if run.get("module_name") == module_name and isinstance(run.get("run_metadata"), dict):
+                            return run["run_metadata"]
+                    return {}
+
+                def _date_year(value: Any) -> str:
+                    text = str(value or "").strip()
+                    return text[:4] if len(text) >= 4 else text
+
+                def _date_month(value: Any) -> str:
+                    text = str(value or "").strip()
+                    return text[:7] if len(text) >= 7 else text
+
+                def _render_wayback(findings: list[Any]) -> None:
+                    usable = [f for f in findings if isinstance(f, dict)]
+                    meta = _module_meta("wayback")
+                    out.print(Rule(f"WAYBACK MACHINE  ({len(usable)} pages)", style="cyan"))
+                    for finding in usable:
+                        f_meta = finding.get("metadata", {})
+                        if not isinstance(f_meta, dict):
+                            f_meta = {}
+                        domain = str(f_meta.get("original_domain") or "archived page")
+                        archive_year = _date_year(f_meta.get("archive_date"))
+                        snippet = str(f_meta.get("context_snippet") or "").strip()
+                        title = str(f_meta.get("page_title") or "").strip()
+                        archive = str(finding.get("profile_url") or "")
+                        label = f"{domain} (archived {archive_year})" if archive_year else domain
+                        out.print(f"  [green]✓[/green] {label}")
+                        if snippet:
+                            out.print(f"    \"{snippet}\"")
+                        elif title:
+                            out.print(f"    [dim]{title}[/dim]")
+                        if archive:
+                            out.print(f"    [dim]Archive:[/dim] {_display_url(archive, 80)}")
+                        out.print()
+                    first_seen = _date_year(meta.get("earliest_mention"))
+                    last_seen = _date_year(meta.get("latest_mention"))
+                    if first_seen or last_seen:
+                        out.print(f"  [dim]First seen: {first_seen or '?'} · Last seen: {last_seen or '?'}[/dim]")
+                        out.print()
+
+                def _render_github_commits(findings: list[Any]) -> None:
+                    usable = [f for f in findings if isinstance(f, dict)]
+                    commits = [f for f in usable if f.get("platform") == "github_commit"]
+                    users = [f for f in usable if f.get("platform") == "github_user"]
+                    meta = _module_meta("github_commits")
+                    out.print(Rule(f"GITHUB COMMITS  ({len(commits)} commits)", style="cyan"))
+                    for finding in commits:
+                        f_meta = finding.get("metadata", {})
+                        if not isinstance(f_meta, dict):
+                            f_meta = {}
+                        repo = str(f_meta.get("repo") or "unknown/repo")
+                        sha = str(f_meta.get("commit_sha") or "")
+                        message = str(f_meta.get("commit_message") or "")
+                        date = _date_month(f_meta.get("commit_date"))
+                        language = str(f_meta.get("repo_language") or "Unknown")
+                        stars = f_meta.get("repo_stars")
+                        out.print(f"  [green]✓[/green] {repo}")
+                        details = " · ".join(part for part in (sha, f'"{message}"' if message else "", date) if part)
+                        if details:
+                            out.print(f"    {details}")
+                        out.print(f"    [dim]Language: {language} · ★ {stars if stars is not None else 0}[/dim]")
+                        out.print()
+                    for finding in users:
+                        f_meta = finding.get("metadata", {})
+                        if not isinstance(f_meta, dict):
+                            f_meta = {}
+                        login = str(f_meta.get("login") or "GitHub user")
+                        profile_url = str(finding.get("profile_url") or "")
+                        out.print(f"  [green]✓[/green] GitHub user: {login}")
+                        if profile_url:
+                            out.print(f"    [dim]{_display_url(profile_url, 80)}[/dim]")
+                        out.print()
+                    real_name = meta.get("real_name_from_git")
+                    if real_name:
+                        out.print(f"  [dim]Real name from git: {real_name}[/dim]")
+                    earliest = _date_year(meta.get("earliest_commit"))
+                    latest = _date_year(meta.get("latest_commit"))
+                    primary_language = meta.get("primary_language")
+                    active = f"{earliest}-{latest}" if earliest and latest else earliest or latest
+                    if active or primary_language:
+                        out.print(
+                            f"  [dim]Active: {active or '?'} · Primary language: {primary_language or 'Unknown'}[/dim]"
+                        )
+                    if real_name or active or primary_language:
+                        out.print()
+
                 for module_name, findings in findings_by_module.items():
+                    if module_name == "breach_deep":
+                        _render_breach_deep(findings)
+                        continue
+                    if module_name == "email_discovery":
+                        _render_email_discovery(findings)
+                        continue
+                    if module_name == "wayback":
+                        _render_wayback(findings)
+                        continue
+                    if module_name == "github_commits":
+                        _render_github_commits(findings)
+                        continue
                     out.print(Rule(f"{_normalize_module_name(module_name)}  ({len(findings)} hits)", style="cyan"))
                     for finding in findings:
                         if not isinstance(finding, dict):
@@ -633,15 +837,24 @@ async def _investigate(
             skipped_runs = [r for r in module_runs if str(r.get("status", "")).lower() == "skipped"]
             
             groups = {
-                "BREACH SOURCES": ["hibp", "haveibeenpwned", "breachdirectory", "hudson_rock"],
-                "RECON MODULES": ["dns_lookup", "whois_lookup", "domain_intel", "google_dork", "shodan", "hunter_io"],
+                "BREACH SOURCES": [
+                    "hibp",
+                    "haveibeenpwned",
+                    "breachdirectory",
+                    "hudson_rock",
+                    "breach_deep",
+                ],
+                "RECON MODULES": ["dns_lookup", "whois_lookup", "domain_intel", "google_dork", "email_discovery", "wayback", "github_commits", "shodan", "hunter_io"],
                 "OPTIONAL MODULES": ["ghunt", "user_scanner", "account_discovery", "whatsmyname", "username_pivot", "permutation_discovery", "phone_intel"]
             }
             
             key_hints = {
                 "hibp": "set HIBP_API_KEY",
                 "haveibeenpwned": "set HIBP_API_KEY",
+                "breach_deep": "set ENABLE_BREACH_DEEP=true or use --modules breach_deep",
                 "google_dork": "set SERPAPI_KEY",
+                "email_discovery": "set SERPAPI_KEY",
+                "github_commits": "set GITHUB_TOKEN for higher GitHub limits",
                 "shodan": "set SHODAN_API_KEY",
                 "domain_intel": "set SHODAN_API_KEY",
                 "hunter_io": "set HUNTER_IO_API_KEY",
@@ -840,7 +1053,14 @@ async def _investigate(
                 src = str(f.get("source", "")).lower()
                 plat = str(f.get("platform", "")).lower()
                 mod = str(f.get("module_name", "")).lower()
-                if "hibp" in (src, plat, mod) or "breachdirectory" in (src, plat, mod) or "hudson_rock" in (src, plat, mod) or "haveibeenpwned" in (src, plat, mod):
+                breach_markers = (
+                    "hibp",
+                    "breachdirectory",
+                    "hudson_rock",
+                    "haveibeenpwned",
+                    "breach_deep",
+                )
+                if any(marker in (src, plat, mod) for marker in breach_markers):
                     breaches_found = True
                     break
         
@@ -885,23 +1105,26 @@ async def _investigate(
             return exit_code
 
         async def render_clusters_output() -> None:
+            discovered_emails = _get_discovered_emails(report_data)
             try:
                 resp = await client.get(f"/api/report/{inv_id}/clusters", timeout=10)
                 resp.raise_for_status()
                 data = resp.json()
                 clusters = data.get("clusters", [])
-                if not clusters:
+                if not clusters and not discovered_emails:
                     return
             except Exception as e:
-                out.print(f"[red]Error rendering clusters:[/] {e}")
-                import traceback
-                out.print(f"[dim]{traceback.format_exc()}[/dim]")
-                return
+                if not discovered_emails:
+                    out.print(f"[red]Error rendering clusters:[/] {e}")
+                    import traceback
+                    out.print(f"[dim]{traceback.format_exc()}[/dim]")
+                    return
+                clusters = []
                 
             out.print(Rule("IDENTITY ANALYSIS", style="bold blue"))
             out.print()
             
-            for i, cluster in enumerate(clusters, 1):
+            for i, cluster in enumerate(clusters or [], 1):
                 conf = cluster.get("confidence", 0.0)
                 label = cluster.get("label", "unknown")
                 reasoning = cluster.get("reasoning", [])
@@ -936,6 +1159,15 @@ async def _investigate(
                     if not is_col and shown >= 5 and len(findings) > 5:
                         out.print(f"    [dim]+ {len(findings) - 5} more accounts[/dim]")
                         break
+                out.print()
+            if discovered_emails:
+                out.print("  [cyan]â†’ Other emails found:[/cyan]")
+                for discovered in discovered_emails:
+                    out.print(f"    {discovered}")
+                out.print(
+                    f"  [dim]Run: mailaccess investigate {discovered_emails[0]} "
+                    "to continue investigation[/dim]"
+                )
                 out.print()
             out.print()
 

@@ -1,6 +1,6 @@
 # Module Reference
 
-MailAccess ships 20 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
+MailAccess ships 24 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
 
 A module marked **key required** skips itself with `status: skipped` when its API key is absent — it does not cause the investigation to fail.
 
@@ -141,6 +141,171 @@ Up to 5 results per dork are returned as findings with platform inferred from th
   "dorks_with_hits": 3
 }
 ```
+
+---
+
+## `email_discovery`
+
+Post-primary module that dorks for other email addresses owned by the same person, using real names recovered by GHunt, Gravatar, WHOIS, breach metadata, social findings, or EmailRep.
+
+| | |
+|--|--|
+| **Gate** | `ENABLE_EMAIL_DISCOVERY=true` (default) |
+| **Requires key** | Yes - `SERPAPI_KEY` |
+| **Runs** | Post-primary; needs a name from primary modules |
+| **Skips** | Automatically if no name was recovered |
+| **Status** | Implemented |
+
+Enabled by default (`ENABLE_EMAIL_DISCOVERY=true`) and self-gating: it skips when `SERPAPI_KEY` is missing or no usable real name was recovered. It does not recursively investigate discovered addresses.
+
+For up to 3 recovered names, it runs these SerpAPI dorks concurrently:
+- `"{full_name}" "@gmail.com" OR "@outlook.com" OR "@yahoo.com" OR "@protonmail.com"`
+- `"{full_name}" "email" OR "contact" -site:linkedin.com -site:facebook.com`
+- `"{full_name}" "@" filetype:pdf OR filetype:csv`
+- `site:linkedin.com "{full_name}" "{domain}"` for corporate target domains only
+
+**Finding example:**
+```json
+{
+  "platform": "email_discovery",
+  "profile_url": "https://docs.example.com/team",
+  "confidence": "high",
+  "metadata": {
+    "discovered_email": "jane.doe@example.net",
+    "source_name": "Jane Doe",
+    "source_url": "https://docs.example.com/team",
+    "snippet": "contact Jane at jane.doe@example.net",
+    "dork_used": "contact_terms"
+  }
+}
+```
+
+**Finding fields:** `discovered_email`, `source_name`, `source_url`, `snippet`, `dork_used`.
+
+**Module metadata:**
+```json
+{
+  "names_searched": 1,
+  "dorks_run": 4,
+  "emails_discovered": 1,
+  "discovered_emails": ["jane.doe@example.net"]
+}
+```
+
+Metadata fields: `names_searched`, `dorks_run`, `emails_discovered`, `discovered_emails`.
+
+---
+
+## `wayback`
+
+Search the Internet Archive Wayback Machine CDX API for archived pages mentioning the email address, then enrich the top results with archived page title and nearby context.
+
+| | |
+|--|--|
+| **Gate** | None; always runs |
+| **Requires key** | No |
+| **Status** | Implemented |
+
+This module runs a bounded CDX search and fetches archived page content for only the top 5 pages to avoid hammering Wayback. A `429` from the archive returns `status: partial`.
+
+**Findings schema (one per archived page):**
+```json
+{
+  "platform": "wayback_machine",
+  "profile_url": "https://web.archive.org/web/20190101120000/https://example.com/contact",
+  "confidence": "high",
+  "metadata": {
+    "original_url": "https://example.com/contact",
+    "archive_date": "2019-01-01",
+    "page_title": "Contact",
+    "context_snippet": "...contact jane@example.com for...",
+    "original_domain": "example.com",
+    "years_ago": 7
+  }
+}
+```
+
+**Finding fields:** `original_url`, `archive_date`, `page_title`, `context_snippet`, `original_domain`, `years_ago`.
+
+**Module metadata:**
+```json
+{
+  "pages_found": 4,
+  "earliest_mention": "2019-01-01",
+  "latest_mention": "2023-06-15",
+  "unique_domains": ["example.com", "forum.example.net"],
+  "oldest_domain": "example.com"
+}
+```
+
+Metadata fields: `pages_found`, `earliest_mention`, `latest_mention`, `unique_domains`, `oldest_domain`.
+
+---
+
+## `github_commits`
+
+Search public GitHub commits for the target email as an author, plus a GitHub user search fallback for public profile emails.
+
+| | |
+|--|--|
+| **Gate** | None; always runs |
+| **Requires key** | No (`GITHUB_TOKEN` optional for higher rate limits) |
+| **Status** | Implemented |
+
+Unauthenticated requests are limited to 10 req/min. With `GITHUB_TOKEN`, the limit rises to 30 req/min.
+
+**Commit finding schema:**
+```json
+{
+  "platform": "github_commit",
+  "profile_url": "https://github.com/owner/repo/commit/abc1234...",
+  "confidence": "high",
+  "metadata": {
+    "repo": "owner/repo",
+    "repo_url": "https://github.com/owner/repo",
+    "commit_sha": "abc1234",
+    "commit_message": "Fix authentication bug",
+    "author_name": "Jane Doe",
+    "commit_date": "2022-03-10T12:34:56Z",
+    "repo_stars": 142,
+    "repo_language": "Python"
+  }
+}
+```
+
+**Finding fields:** `repo`, `repo_url`, `commit_sha`, `commit_message`, `author_name`, `commit_date`, `repo_stars`, `repo_language`.
+
+**GitHub user finding schema:**
+```json
+{
+  "platform": "github_user",
+  "profile_url": "https://github.com/janedoe",
+  "confidence": "high",
+  "metadata": {
+    "login": "janedoe",
+    "name": "Jane Doe",
+    "bio": "Security engineer",
+    "public_repos": 24,
+    "followers": 180,
+    "avatar_url": "https://avatars.githubusercontent.com/u/..."
+  }
+}
+```
+
+**Module metadata:**
+```json
+{
+  "commits_found": 3,
+  "repos_contributed_to": ["owner/repo"],
+  "real_name_from_git": "Jane Doe",
+  "earliest_commit": "2021-11-01T09:00:00Z",
+  "latest_commit": "2023-04-12T18:30:00Z",
+  "primary_language": "Python",
+  "github_user_found": true
+}
+```
+
+Metadata fields: `commits_found`, `repos_contributed_to`, `real_name_from_git`, `earliest_commit`, `latest_commit`, `primary_language`, `github_user_found`.
 
 ---
 
@@ -703,6 +868,71 @@ Enabled by default (`ENABLE_MESSAGING_HINTS=true`). Rate-limited to **3 Telegram
   "signal_checkable": false
 }
 ```
+
+---
+
+## `breach_deep`
+
+Probes account existence on the top 100 HIBP-ranked breached sites from the public HIBP breach corpus.
+
+| | |
+|--|--|
+| **Gate** | `ENABLE_BREACH_DEEP=false` (opt-in) |
+| **Requires key** | None; HIBP corpus is public |
+| **Timeout** | 90s default; set in `MODULE_TIMEOUT_OVERRIDES` |
+| **Status** | Implemented |
+
+On startup MailAccess fetches `https://haveibeenpwned.com/api/v3/breaches` and caches it for 24 hours at `data/cache/breach_corpus.json`. Breaches are ranked by `PwnCount` multiplied by high-impact data classes: passwords, credit cards, financial data, and phone numbers. By default the module checks the top 100 ranked domains.
+
+Enable with `ENABLE_BREACH_DEEP=true`, run once with `mailaccess investigate user@example.com --modules breach_deep`, or tune:
+
+```env
+BREACH_DEEP_LIMIT=100
+BREACH_DEEP_FULL=false
+```
+
+Known local YAML probes are reused first (`adobe`, `spotify`, `dropbox`, `github`, `discord`, `linkedin`, `zoom`, `skype`, `apple`, `patreon`). Other domains use bounded generic password-reset inference against the first three common reset endpoints with an 8 second per-site timeout and concurrency capped at 30.
+
+Out of scope: credential verification, password hash lookup, dark web queries, and breach-dataset contents. This module only infers account existence on breached domains.
+
+**Findings schema:**
+```json
+{
+  "platform": "adobe.com",
+  "url": "https://adobe.com",
+  "confidence": "high",
+  "severity": "critical",
+  "source": "breach_deep",
+  "metadata": {
+    "breach_name": "Adobe",
+    "breach_date": "2013-10-04",
+    "pwn_count": 152445165,
+    "data_classes": ["Email addresses", "Password hints", "Passwords", "Usernames"],
+    "severity_label": "critical",
+    "severity_score": 457335495.0,
+    "probe_method": "yaml",
+    "implication": "Credentials from this account may be in publicly available breach datasets"
+  }
+}
+```
+
+**Finding fields:** `breach_name`, `breach_date`, `pwn_count`, `data_classes`, `severity_label`, `probe_method`, `implication`.
+
+**Module metadata:**
+```json
+{
+  "sites_checked": 100,
+  "sites_confirmed": 8,
+  "critical_hits": 2,
+  "high_hits": 6,
+  "total_records_potentially_exposed": 534000000,
+  "top_breach": "LinkedIn"
+}
+```
+
+Metadata fields: `sites_checked`, `sites_confirmed`, `critical_hits`, `high_hits`, `total_records_potentially_exposed`, `top_breach`.
+
+Note: uses YAML probes for known platforms and generic reset-flow inference for unknown domains.
 
 ---
 

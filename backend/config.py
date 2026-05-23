@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # Permutation discovery — generates email variations from recovered names,
     # then probes each with Hudson Rock (+ HIBP if key is set)
     enable_permutation_discovery: bool = True
+    enable_email_discovery: bool = True
 
     # GHunt (opt-in — requires ghunt>=2.3 installed and a valid creds file from `ghunt login`)
     # Cookies expire periodically and require manual refresh via `ghunt login`.
@@ -56,6 +57,11 @@ class Settings(BaseSettings):
 
     # Messaging hints: Telegram username checks during primary gather
     enable_messaging_hints: bool = True
+
+    # Deep breach probing: opt-in account-existence checks across top HIBP breach domains
+    enable_breach_deep: bool = False
+    breach_deep_limit: int = 100
+    breach_deep_full: bool = False
 
     # Investigation cache: when an identical email is investigated within
     # `investigation_cache_window_minutes`, reuse the most recent COMPLETE
@@ -80,6 +86,7 @@ class Settings(BaseSettings):
     emailrep_api_key: str | None = None
     shodan_api_key: str | None = None
     serpapi_key: str | None = None
+    github_token: str | None = None
 
     # Proxy
     proxy_url: str | None = None

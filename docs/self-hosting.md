@@ -85,6 +85,18 @@ Every setting is optional unless marked required.
 | `ENABLE_INVESTIGATION_CACHE` | `true` | Cache complete investigation results; repeated queries within the window return instantly |
 | `INVESTIGATION_CACHE_WINDOW_MINUTES` | `30` | How long a cached result is considered fresh (minutes) |
 
+### Modules
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_BREACH_DEEP` | `false` | Opt-in deep breach probe |
+| `BREACH_DEEP_LIMIT` | `100` | Sites to probe; max 750 |
+| `BREACH_DEEP_FULL` | `false` | Probe all 750 HIBP sites |
+| `ENABLE_EMAIL_DISCOVERY` | `true` | Name-to-email dorks |
+| `GITHUB_TOKEN` | _(unset)_ | Optional; increases GitHub rate limits |
+
+MailAccess fetches the HIBP breach corpus on startup and caches it at `data/cache/breach_corpus.json` for 24h. No API key required for this fetch.
+
 ### Rate Limiting
 
 | Variable | Default | Description |
@@ -118,6 +130,7 @@ All API keys are optional. Modules that require a missing key skip themselves wi
 |----------|---------|-------------|
 | `HIBP_API_KEY` | `hibp` module | https://haveibeenpwned.com/API/Key |
 | `SERPAPI_KEY` | `google_dork` module | https://serpapi.com |
+| `GITHUB_TOKEN` | `github_commits` module (optional) | https://github.com/settings/tokens |
 | `SHODAN_API_KEY` | `domain_intel` (optional), `shodan` module | https://account.shodan.io |
 | `EMAILREP_API_KEY` | `emailrep` module (raises rate limit) | https://emailrep.io |
 | `HUNTER_IO_API_KEY` | `hunter_io` module | https://hunter.io |

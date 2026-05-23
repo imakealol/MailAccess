@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -40,6 +41,17 @@ async def lifespan(_app: FastAPI):
     
     await init_db()
     generate_mtz_bundle(_MTZ_PATH)
+    async def _warm_breach_corpus() -> None:
+        try:
+            from .core.breach_corpus import BreachCorpus
+
+            await asyncio.to_thread(BreachCorpus().load)
+        except Exception as exc:
+            logging.getLogger("mailaccess.startup").debug(
+                "breach corpus warmup skipped: %s", exc
+            )
+
+    asyncio.create_task(_warm_breach_corpus())
     _slog = logging.getLogger("mailaccess.startup")
     if settings.module_timeout_overrides:
         _slog.info(
@@ -52,7 +64,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="MailAccess",
     description="OSINT email intelligence API",
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
     debug=settings.debug,
 )

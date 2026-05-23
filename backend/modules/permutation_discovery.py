@@ -1,65 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-import re
 
 from ..config import settings
+from ..core.name_extractor import extract_names
 from ..core.permutator import _DEFAULT_DOMAINS, generate_permutations
 from .base import ModuleResult, ModuleStatus
-
-_NAME_KEYS = frozenset({"name", "display_name", "full_name", "real_name"})
-_FULL_NAME_RE = re.compile(r"^([A-Za-z'\-]+)\s+([A-Za-z'\-]+)")
-
-
-def _extract_names(collected: dict) -> list[tuple[str, str]]:
-    """Return (first, last) pairs recovered from any primary-module finding."""
-    candidates: list[tuple[str, str]] = []
-    seen: set[tuple[str, str]] = set()
-
-    def _add(fn: str, ln: str) -> None:
-        fn, ln = fn.strip(), ln.strip()
-        if not fn or not ln:
-            return
-        key = (fn.lower(), ln.lower())
-        if key not in seen:
-            seen.add(key)
-            candidates.append((fn, ln))
-
-    for result in collected.values():
-        if not hasattr(result, "findings"):
-            continue
-        for finding in result.findings:
-            if not isinstance(finding, dict):
-                continue
-            # Check both the top-level payload and its metadata sub-dict
-            for payload in (finding, finding.get("metadata") or {}):
-                if not isinstance(payload, dict):
-                    continue
-
-                # Explicit split fields (Hudson Rock, some breach datasets)
-                _add(
-                    str(payload.get("first_name", "")),
-                    str(payload.get("last_name", "")),
-                )
-
-                # Full-name fields — split on first whitespace boundary
-                for key in _NAME_KEYS:
-                    val = payload.get(key, "")
-                    if not isinstance(val, str) or not val.strip():
-                        continue
-                    m = _FULL_NAME_RE.match(val.strip())
-                    if m:
-                        _add(m.group(1), m.group(2))
-
-    return candidates
 
 
 class PermutationDiscovery:
     """
     Post-primary-phase orchestrator.
 
-    Not a BaseModule subclass — invoked explicitly by the engine after the
-    primary gather completes.  If any module recovered a real name, generates
+    Not a BaseModule subclass - invoked explicitly by the engine after the
+    primary gather completes. If any module recovered a real name, generates
     up to 60 email permutations and probes each with HIBP and Hudson Rock.
     """
 
@@ -72,7 +26,11 @@ class PermutationDiscovery:
                 errors=["ENABLE_PERMUTATION_DISCOVERY is not set"],
             )
 
-        names = _extract_names(collected)
+        names = [
+            (person.first_name, person.last_name)
+            for person in extract_names(collected)
+            if person.first_name and person.last_name
+        ]
         if not names:
             return ModuleResult(
                 status=ModuleStatus.SKIPPED,

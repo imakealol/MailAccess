@@ -12,6 +12,7 @@ class UnifiedProfile:
     usernames: list[str] = field(default_factory=list)
     phones: list[str] = field(default_factory=list)
     emails: list[str] = field(default_factory=list)
+    discovered_emails: list[str] = field(default_factory=list)
     locations: list[str] = field(default_factory=list)
     # Confirmed or probed accounts: breach-confirmed domains + social/discovery hits
     accounts_found: list[dict] = field(default_factory=list)
@@ -51,6 +52,7 @@ class ProfileAggregator:
         usernames: set[str] = set()
         phones: set[str] = set()
         emails: set[str] = set()
+        discovered_emails: set[str] = set()
         locations: set[str] = set()
         accounts: dict[str, dict] = {}  # keyed by platform for dedup
 
@@ -59,6 +61,18 @@ class ProfileAggregator:
             payload: dict = finding.get("data", finding)
             if not isinstance(payload, dict):
                 continue
+
+            module_name = str(finding.get("module_name", "")).lower()
+            metadata = payload.get("metadata")
+            if (
+                (
+                    module_name == "email_discovery"
+                    or payload.get("platform") == "email_discovery"
+                )
+                and isinstance(metadata, dict)
+                and isinstance(metadata.get("discovered_email"), str)
+            ):
+                discovered_emails.add(metadata["discovered_email"].strip().lower())
 
             # Collect account-presence signals
             platform = payload.get("platform")
@@ -96,6 +110,7 @@ class ProfileAggregator:
             usernames=sorted(usernames),
             phones=sorted(phones),
             emails=sorted(emails),
+            discovered_emails=sorted(discovered_emails),
             locations=sorted(locations),
             accounts_found=sorted(accounts.values(), key=lambda a: a["platform"]),
         )

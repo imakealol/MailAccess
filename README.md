@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](docker-compose.yml)
-[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.3.4&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
+[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.4.0&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mailaccess)](https://pypi.org/project/mailaccess/)
 
 Self-hostable OSINT platform for investigating email addresses. Fan out across breach databases, social networks, DNS records, and the open web — get back a unified exposure score and structured findings you can export or pipe into Maltego.
@@ -60,6 +60,9 @@ mailaccess doctor                               # coming soon
 - **Phone number recovery** — pipeline to surface and validate numbers tied to the target
 - **Telegram / WhatsApp hints** — lightweight messaging-app footprint checks alongside other modules
 - **YAML-driven platform system** — social-style checks defined in `backend/platforms/`; community extensible without new Python for each site
+- **Deep breach mode** — checks top 100 highest-severity breached sites for account existence
+- **Historical intelligence** — Wayback Machine archive search + GitHub commit author search
+- **Recursive email discovery** — recovers other emails owned by the same person via name correlation
 - Concurrent module execution — all modules run in parallel, results stream as they arrive
 - WebSocket streaming — partial results arrive in real time without polling
 - REST API + web UI + CLI — use whatever interface fits your workflow
@@ -76,12 +79,16 @@ mailaccess doctor                               # coming soon
 |--------|----------|--------------|--------|
 | gravatar | Profile hash lookup | No | No |
 | hibp | Breach check | Yes | No |
+| breach_deep | Probes top 100 highest-severity breached sites for account existence | No (HIBP corpus fetched automatically) | Yes |
 | emailrep | Reputation + blacklist | No | No |
 | hudson_rock | Infostealer logs (free) | No | No |
 | google_dork | 5 automated dorks | Yes (SerpAPI) | No |
+| email_discovery | Recovers other email addresses owned by same person via name dorks | Yes (SERPAPI_KEY) | No |
 | domain_intel | Domain + Shodan | No (Shodan optional) | No |
 | dns_lookup | MX/SPF/DMARC/DKIM/A/NS extraction | No | No |
 | whois_lookup | Domain WHOIS, privacy detection | No | No |
+| wayback | Finds historical pages where email appeared publicly via Wayback Machine CDX | No | No |
+| github_commits | Finds repos committed to with this email, surfaces real name from git config | No (GITHUB_TOKEN optional) | No |
 | social | 13 platforms via YAML | No | No |
 | social_links | Username extraction, feeds pivot | No | No |
 | account_discovery | Holehe 120+ platforms | No | Yes |
@@ -95,7 +102,7 @@ mailaccess doctor                               # coming soon
 | ghunt | Gmail deep intel | No (setup required) | Yes |
 | identity_graph | Cross-platform cluster analysis | No | No (automatic) |
 
-> 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
+> 24 modules, 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
 
 ## Identity Graph
 
@@ -106,6 +113,28 @@ Every investigation generates a cross-platform identity graph linking accounts b
 Export as D3-compatible JSON via `GET /api/report/{id}/graph` or fetch clusters with confidence scores via `GET /api/report/{id}/clusters`.
 
 Findings are automatically grouped into identity clusters with confidence scoring. Use `--show-collisions` to expand low-confidence matches in CLI output.
+
+## Historical Intelligence
+
+MailAccess searches the Wayback Machine CDX API for archived pages where the email appeared publicly — catching deleted blog posts, old forum signatures, and removed contact pages.
+
+GitHub commit history is searched by author email, revealing repos contributed to, real name from git config, and development activity timeline.
+
+## Deep Breach Mode
+
+Enable with `ENABLE_BREACH_DEEP=true`.
+
+Fetches the full HIBP breach corpus on startup, ranks sites by severity (record count × data class multipliers), then probes the top 100 highest-severity sites for account existence via YAML probes and generic reset-flow inference. Findings show breach name, record count, data classes, and severity — giving analysts a probabilistic credential exposure estimate.
+
+Example output:
+
+```text
+⚠ adobe.com    CRITICAL  153M records
+  [Passwords, Email, Password hints]
+✓ dropbox.com  HIGH       69M records
+  [Email, Passwords]
+~222M records across 2 breaches potentially include this email's credentials
+```
 
 ## Pipeline
 
@@ -196,8 +225,19 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | `SHODAN_API_KEY` | `domain_intel` | https://account.shodan.io | No |
 | `EMAILREP_API_KEY` | `emailrep` | https://emailrep.io | No |
 | `HUNTER_IO_API_KEY` | `hunter_io` | https://hunter.io | No |
+| `GITHUB_TOKEN` | `github_commits` | https://github.com/settings/tokens | No (optional) |
 | `SLACK_WEBHOOK_URL` | Webhooks | https://api.slack.com/messaging/webhooks | No |
 | `DISCORD_WEBHOOK_URL` | Webhooks | Discord server settings | No |
+
+## Changelog
+
+### 0.4.0
+
+- Deep breach mode: probes top 100 highest-severity breached sites for account existence (opt-in, `ENABLE_BREACH_DEEP=true`)
+- Name → email discovery: recovers other email addresses owned by same person via SerpAPI dorks (requires `SERPAPI_KEY`)
+- Wayback Machine: CDX search for historical pages where email appeared publicly
+- GitHub commit search: author-email search across all public commits, surfaces repos + real name from git config (`GITHUB_TOKEN` optional)
+- Breach corpus: auto-fetched from HIBP public API, severity-ranked by record count × data class multipliers, cached 24h
 
 ## Troubleshooting
 

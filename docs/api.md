@@ -55,6 +55,12 @@ Start an investigation. Returns immediately with an ID — the investigation run
 
 `modules` is optional. Omit it to run all registered modules. Set `force: true` to bypass the investigation cache and always run a fresh investigation.
 
+New modules available in 0.4.0: `breach_deep`, `email_discovery`, `wayback`, `github_commits`. Pass them in the `modules` array to run selectively:
+
+```json
+{ "email": "user@example.com", "modules": ["breach_deep"] }
+```
+
 **Response `202`** — new investigation started
 ```json
 {
