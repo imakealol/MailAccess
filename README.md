@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](docker-compose.yml)
-[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.4.0&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
+[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.4.3&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mailaccess)](https://pypi.org/project/mailaccess/)
 
 Self-hostable OSINT platform for investigating email addresses. Fan out across breach databases, social networks, DNS records, and the open web — get back a unified exposure score and structured findings you can export or pipe into Maltego.
@@ -50,6 +50,10 @@ mailaccess keys list
 mailaccess keys set HIBP_API_KEY your-key-here
 mailaccess modules
 mailaccess doctor                               # coming soon
+
+# Enable specific opt-in modules for one run
+mailaccess investigate email -m breach_deep
+mailaccess investigate email -m all
 ```
 
 ![Investigation demo](public/investigation.gif)
@@ -88,7 +92,7 @@ mailaccess doctor                               # coming soon
 | dns_lookup | MX/SPF/DMARC/DKIM/A/NS extraction | No | No |
 | whois_lookup | Domain WHOIS, privacy detection | No | No |
 | wayback | Finds historical pages where email appeared publicly via Wayback Machine CDX | No | No |
-| github_commits | Finds repos committed to with this email, surfaces real name from git config | No (GITHUB_TOKEN optional) | No |
+| github_commits | Finds repos committed to with this email, surfaces real name from git config. Requires GITHUB_TOKEN for commit search; user profile search works without token. | No (GITHUB_TOKEN optional, required for commit search) | No |
 | social | 13 platforms via YAML | No | No |
 | social_links | Username extraction, feeds pivot | No | No |
 | account_discovery | Holehe 120+ platforms | No | Yes |
@@ -213,6 +217,7 @@ Open **http://localhost:3000** in your browser. Full setup guide: [docs/self-hos
 | `mailaccess modules` | List all available modules |
 | `mailaccess commands` | List all CLI commands |
 | `mailaccess doctor` | Check configuration and module health _(coming soon)_ |
+| `mailaccess investigate <email> -m` / `--enable` | Enable opt-in modules for this run only. Comma-separated or `all`. Example: `-m breach_deep,ghunt` |
 
 The `--output` / `-o` flag on `investigate` saves the report to a file. The extension determines the format: `.json`, `.csv`, `.pdf`, `.md`, `.stix.json`, `.maltego.csv`.
 
@@ -230,6 +235,23 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | `DISCORD_WEBHOOK_URL` | Webhooks | Discord server settings | No |
 
 ## Changelog
+
+### 0.4.3
+
+- `github_commits`: returns `PARTIAL` (not `FAILED`) without `GITHUB_TOKEN`, includes setup hint
+- `whois_lookup`: IANA-managed domains now parse correctly, timezone-aware datetime fix, richer field extraction (`organisation`, `nserver`, `registered`, `expires`)
+
+### 0.4.2
+
+- Default modules now run without any flags: `whatsmyname`, `account_discovery`, `user_scanner`, `username_pivot`, `permutation_discovery`, `phone_intel`, `messaging_hints`
+- `-m` / `--enable` flag for opt-in modules per run (`breach_deep`, `ghunt`, `email_discovery`)
+- `-m all` enables all three opt-in modules
+- Invalid `-m` module name shows helpful warning
+
+### 0.4.1
+
+- Deep breach mode and email discovery improvements
+- Phone extractor false positive fixes carried forward
 
 ### 0.4.0
 

@@ -252,6 +252,11 @@ Search public GitHub commits for the target email as an author, plus a GitHub us
 | **Requires key** | No (`GITHUB_TOKEN` optional for higher rate limits) |
 | **Status** | Implemented |
 
+> **GITHUB_TOKEN is required for commit author-email search.** Without it the module returns `PARTIAL` and runs the user profile search fallback only. Set via:
+> ```
+> mailaccess keys set GITHUB_TOKEN your-token
+> ```
+
 Unauthenticated requests are limited to 10 req/min. With `GITHUB_TOKEN`, the limit rises to 30 req/min.
 
 **Commit finding schema:**
@@ -383,6 +388,8 @@ Full WHOIS registration data for the email's domain. Skips free email providers 
 |--|--|
 | **Requires key** | No |
 | **Status** | Implemented |
+
+> **Supports IANA-managed domains** via raw socket fallback to `whois.iana.org`. Returns `PARTIAL` if the primary parser fails but the fallback succeeds. Only `FAILED` on a network error.
 
 **Findings schema:**
 ```json

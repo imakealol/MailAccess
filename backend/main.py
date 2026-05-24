@@ -64,7 +64,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="MailAccess",
     description="OSINT email intelligence API",
-    version="0.4.0",
+    version="0.4.1",
     lifespan=lifespan,
     debug=settings.debug,
 )

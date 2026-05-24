@@ -87,6 +87,7 @@ class InvestigationService:
         email: str,
         module_names: list[str] | None = None,
         force: bool = False,
+        enable_modules: list[str] | None = None,
     ) -> tuple[str, datetime, asyncio.Queue | None, bool]:
         """
         Persist a new Investigation (PENDING), launch the engine in the
@@ -120,7 +121,7 @@ class InvestigationService:
             timeout=settings.module_timeout_seconds,
             max_concurrency=settings.max_concurrent_modules,
         )
-        queue = await engine.investigate(email, investigation_id, module_names)
+        queue = await engine.investigate(email, investigation_id, module_names, enable_modules)
         return investigation_id, created_at, queue, False
 
     async def get_investigation(self, investigation_id: str) -> dict | None:

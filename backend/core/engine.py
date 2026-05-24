@@ -172,6 +172,7 @@ class InvestigationEngine:
         email: str,
         investigation_id: str,
         module_names: list[str] | None = None,
+        enable_modules: list[str] | None = None,
     ) -> asyncio.Queue[QueueEvent | None]:
         """
         Start investigation and return the result queue immediately.
@@ -229,232 +230,247 @@ class InvestigationEngine:
             self.status = InvestigationStatus.RUNNING
             await self._set_status(investigation_id, InvestigationStatus.RUNNING)
 
-            await asyncio.gather(
-                *[_run_one(cls) for cls in classes],
-                return_exceptions=True,
-            )
-
             from ..config import settings as _cfg
-            _primary_collected = dict(collected)
 
-            if _cfg.enable_username_pivot:
-                from ..modules.username_pivot import UsernamePivotModule
+            _OPT_IN_MAP = {
+                "breach_deep": "enable_breach_deep",
+                "ghunt": "enable_ghunt",
+                "email_discovery": "enable_email_discovery",
+            }
 
-                _pivot = UsernamePivotModule()
-                _pivot_timeout = _cfg.module_timeout_overrides.get(
-                    _pivot.name, _cfg.module_timeout_seconds
+            override_flags = {
+                _OPT_IN_MAP[name]: True
+                for name in (enable_modules or [])
+                if name in _OPT_IN_MAP
+            }
+
+            from unittest.mock import patch
+            with patch.multiple(_cfg, **override_flags):
+                await asyncio.gather(
+                    *[_run_one(cls) for cls in classes],
+                    return_exceptions=True,
                 )
-                await queue.put(QueueEvent(type="module_start", module_name=_pivot.name))
+
+                _primary_collected = dict(collected)
+
+                if _cfg.enable_username_pivot:
+                    from ..modules.username_pivot import UsernamePivotModule
+
+                    _pivot = UsernamePivotModule()
+                    _pivot_timeout = _cfg.module_timeout_overrides.get(
+                        _pivot.name, _cfg.module_timeout_seconds
+                    )
+                    await queue.put(QueueEvent(type="module_start", module_name=_pivot.name))
+                    try:
+                        _pivot_result = await asyncio.wait_for(
+                            _pivot.run(email, collected), timeout=_pivot_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        _pivot_result = ModuleResult(
+                            status=ModuleStatus.FAILED,
+                            errors=[f"timed out after {_pivot_timeout}s"],
+                        )
+                    except Exception as _exc:
+                        _pivot_result = ModuleResult(
+                            status=ModuleStatus.FAILED, errors=[str(_exc)]
+                        )
+                    collected[_pivot.name] = _pivot_result
+                    _pivot_evt = (
+                        "module_error"
+                        if _pivot_result.status == ModuleStatus.FAILED
+                        else "module_result"
+                    )
+                    await queue.put(
+                        QueueEvent(
+                            type=_pivot_evt, module_name=_pivot.name, result=_pivot_result
+                        )
+                    )
+
+                # Permutation discovery phase — runs after primary modules so it can
+                # read their findings to extract a real name.
+                if _cfg.enable_permutation_discovery:
+                    from ..modules.permutation_discovery import PermutationDiscovery
+                    _perm = PermutationDiscovery()
+                    await queue.put(QueueEvent(type="module_start", module_name=_perm.name))
+                    try:
+                        _perm_result = await _perm.run(email, collected)
+                    except Exception as _exc:
+                        _perm_result = ModuleResult(
+                            status=ModuleStatus.FAILED, errors=[str(_exc)]
+                        )
+                    collected[_perm.name] = _perm_result
+                    _evt = (
+                        "module_error"
+                        if _perm_result.status == ModuleStatus.FAILED
+                        else "module_result"
+                    )
+                    await queue.put(
+                        QueueEvent(type=_evt, module_name=_perm.name, result=_perm_result)
+                    )
+
+                if _cfg.enable_email_discovery:
+                    from ..modules.email_discovery import EmailDiscoveryModule
+
+                    _email_discovery = EmailDiscoveryModule()
+                    _email_timeout = _cfg.module_timeout_overrides.get(
+                        _email_discovery.name, _cfg.module_timeout_seconds
+                    )
+                    await queue.put(
+                        QueueEvent(
+                            type="module_start", module_name=_email_discovery.name
+                        )
+                        )
+                    try:
+                        _email_result = await asyncio.wait_for(
+                            _email_discovery.run(email, _primary_collected),
+                            timeout=_email_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        _email_result = ModuleResult(
+                            status=ModuleStatus.FAILED,
+                            errors=[f"timed out after {_email_timeout}s"],
+                        )
+                    except Exception as _exc:
+                        _email_result = ModuleResult(
+                            status=ModuleStatus.FAILED, errors=[str(_exc)]
+                        )
+                    collected[_email_discovery.name] = _email_result
+                    _email_evt = (
+                        "module_error"
+                        if _email_result.status == ModuleStatus.FAILED
+                        else "module_result"
+                    )
+                    await queue.put(
+                        QueueEvent(
+                            type=_email_evt,
+                            module_name=_email_discovery.name,
+                            result=_email_result,
+                        )
+                    )
+
+                if _cfg.enable_phone_intel:
+                    from ..core.phone_extractor import extract_phones
+                    from ..modules.phone_intel import PhoneIntelModule
+
+                    _phone = PhoneIntelModule()
+                    _phone_timeout = _cfg.module_timeout_overrides.get(
+                        _phone.name, _cfg.module_timeout_seconds
+                    )
+                    await queue.put(QueueEvent(type="module_start", module_name=_phone.name))
+                    try:
+                        _phone_result = await asyncio.wait_for(
+                            _phone.run(email, collected), timeout=_phone_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        _phone_result = ModuleResult(
+                            status=ModuleStatus.FAILED,
+                            errors=[f"timed out after {_phone_timeout}s"],
+                        )
+                    except Exception as _exc:
+                        _phone_result = ModuleResult(
+                            status=ModuleStatus.FAILED, errors=[str(_exc)]
+                        )
+                    collected[_phone.name] = _phone_result
+                    _phone_evt = (
+                        "module_error"
+                        if _phone_result.status == ModuleStatus.FAILED
+                        else "module_result"
+                    )
+                    await queue.put(
+                        QueueEvent(
+                            type=_phone_evt, module_name=_phone.name, result=_phone_result
+                        )
+                    )
+
+                    # Re-run messaging hints with recovered phones (WhatsApp path)
+                    if _cfg.enable_messaging_hints:
+                        from ..modules.messaging_hints import MessagingHintsModule
+
+                        _all_findings: list = []
+                        for _r in collected.values():
+                            if hasattr(_r, "findings"):
+                                _all_findings.extend(_r.findings)
+                        _phones = extract_phones(_all_findings)
+                        if _phones:
+                            _msg = MessagingHintsModule()
+                            try:
+                                _msg_extra = await asyncio.wait_for(
+                                    _msg.run(email, phone_hints=_phones, collected=collected),
+                                    timeout=_cfg.module_timeout_seconds,
+                                )
+                                if _msg_extra.findings:
+                                    prev = collected.get(_msg.name)
+                                    if prev and hasattr(prev, "findings"):
+                                        existing_urls = {
+                                            f.get("profile_url") for f in prev.findings
+                                        }
+                                        new_only = [
+                                            f for f in _msg_extra.findings
+                                            if f.get("profile_url") not in existing_urls
+                                        ]
+                                        prev.findings = list(prev.findings) + new_only
+                                        if prev.metadata and _msg_extra.metadata:
+                                            prev.metadata["whatsapp_followup"] = True
+                                    else:
+                                        collected[_msg.name] = _msg_extra
+                            except Exception:
+                                pass
+
+                graph_data: dict | None = None
                 try:
-                    _pivot_result = await asyncio.wait_for(
-                        _pivot.run(email, collected), timeout=_pivot_timeout
-                    )
-                except asyncio.TimeoutError:
-                    _pivot_result = ModuleResult(
-                        status=ModuleStatus.FAILED,
-                        errors=[f"timed out after {_pivot_timeout}s"],
-                    )
-                except Exception as _exc:
-                    _pivot_result = ModuleResult(
-                        status=ModuleStatus.FAILED, errors=[str(_exc)]
-                    )
-                collected[_pivot.name] = _pivot_result
-                _pivot_evt = (
-                    "module_error"
-                    if _pivot_result.status == ModuleStatus.FAILED
-                    else "module_result"
-                )
-                await queue.put(
-                    QueueEvent(
-                        type=_pivot_evt, module_name=_pivot.name, result=_pivot_result
-                    )
-                )
+                    from .identity_graph import IdentityGraph
 
-            # Permutation discovery phase — runs after primary modules so it can
-            # read their findings to extract a real name.
-            if _cfg.enable_permutation_discovery:
-                from ..modules.permutation_discovery import PermutationDiscovery
-                _perm = PermutationDiscovery()
-                await queue.put(QueueEvent(type="module_start", module_name=_perm.name))
+                    _findings_flat = []
+                    for _mod, _res in collected.items():
+                        if hasattr(_res, "findings"):
+                            for _f in _res.findings:
+                                _findings_flat.append({"module_name": _mod, "data": _f})
+                    graph_data = IdentityGraph.build(
+                        {"email": email, "findings": _findings_flat}
+                    ).to_d3()
+                except Exception:
+                    graph_data = None
+
+                # Sort collected once, after every module has reported, so the
+                # exposure score and persisted finding order are independent of
+                # async completion order.
+                # NOTE: use a separate variable to avoid shadowing the closed-over
+                # `collected` in _run_and_persist — assigning to `collected` here
+                # would make Python treat it as a local throughout the function,
+                # causing UnboundLocalError on every earlier reference.
+                _final = _sort_collected(collected)
+
+                # Persist before sentinel so consumers see the final score in the DB.
+                self.status = InvestigationStatus.COMPLETE
                 try:
-                    _perm_result = await _perm.run(email, collected)
-                except Exception as _exc:
-                    _perm_result = ModuleResult(
-                        status=ModuleStatus.FAILED, errors=[str(_exc)]
-                    )
-                collected[_perm.name] = _perm_result
-                _evt = (
-                    "module_error"
-                    if _perm_result.status == ModuleStatus.FAILED
-                    else "module_result"
-                )
-                await queue.put(
-                    QueueEvent(type=_evt, module_name=_perm.name, result=_perm_result)
-                )
+                    await self._persist(investigation_id, _final, started_at, graph_data)
 
-            if _cfg.enable_email_discovery:
-                from ..modules.email_discovery import EmailDiscoveryModule
+                    # Dispatch webhooks if configured
+                    try:
+                        from ..integrations.webhooks import WebhookDispatcher
+                        score = _compute_exposure_score(_final)
+                        await WebhookDispatcher().dispatch(email, score, _final)
 
-                _email_discovery = EmailDiscoveryModule()
-                _email_timeout = _cfg.module_timeout_overrides.get(
-                    _email_discovery.name, _cfg.module_timeout_seconds
-                )
-                await queue.put(
-                    QueueEvent(
-                        type="module_start", module_name=_email_discovery.name
-                    )
-                    )
-                try:
-                    _email_result = await asyncio.wait_for(
-                        _email_discovery.run(email, _primary_collected),
-                        timeout=_email_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    _email_result = ModuleResult(
-                        status=ModuleStatus.FAILED,
-                        errors=[f"timed out after {_email_timeout}s"],
-                    )
-                except Exception as _exc:
-                    _email_result = ModuleResult(
-                        status=ModuleStatus.FAILED, errors=[str(_exc)]
-                    )
-                collected[_email_discovery.name] = _email_result
-                _email_evt = (
-                    "module_error"
-                    if _email_result.status == ModuleStatus.FAILED
-                    else "module_result"
-                )
-                await queue.put(
-                    QueueEvent(
-                        type=_email_evt,
-                        module_name=_email_discovery.name,
-                        result=_email_result,
-                    )
-                )
-
-            if _cfg.enable_phone_intel:
-                from ..core.phone_extractor import extract_phones
-                from ..modules.phone_intel import PhoneIntelModule
-
-                _phone = PhoneIntelModule()
-                _phone_timeout = _cfg.module_timeout_overrides.get(
-                    _phone.name, _cfg.module_timeout_seconds
-                )
-                await queue.put(QueueEvent(type="module_start", module_name=_phone.name))
-                try:
-                    _phone_result = await asyncio.wait_for(
-                        _phone.run(email, collected), timeout=_phone_timeout
-                    )
-                except asyncio.TimeoutError:
-                    _phone_result = ModuleResult(
-                        status=ModuleStatus.FAILED,
-                        errors=[f"timed out after {_phone_timeout}s"],
-                    )
-                except Exception as _exc:
-                    _phone_result = ModuleResult(
-                        status=ModuleStatus.FAILED, errors=[str(_exc)]
-                    )
-                collected[_phone.name] = _phone_result
-                _phone_evt = (
-                    "module_error"
-                    if _phone_result.status == ModuleStatus.FAILED
-                    else "module_result"
-                )
-                await queue.put(
-                    QueueEvent(
-                        type=_phone_evt, module_name=_phone.name, result=_phone_result
-                    )
-                )
-
-                # Re-run messaging hints with recovered phones (WhatsApp path)
-                if _cfg.enable_messaging_hints:
-                    from ..modules.messaging_hints import MessagingHintsModule
-
-                    _all_findings: list = []
-                    for _r in collected.values():
-                        if hasattr(_r, "findings"):
-                            _all_findings.extend(_r.findings)
-                    _phones = extract_phones(_all_findings)
-                    if _phones:
-                        _msg = MessagingHintsModule()
-                        try:
-                            _msg_extra = await asyncio.wait_for(
-                                _msg.run(email, phone_hints=_phones, collected=collected),
-                                timeout=_cfg.module_timeout_seconds,
-                            )
-                            if _msg_extra.findings:
-                                prev = collected.get(_msg.name)
-                                if prev and hasattr(prev, "findings"):
-                                    existing_urls = {
-                                        f.get("profile_url") for f in prev.findings
-                                    }
-                                    new_only = [
-                                        f for f in _msg_extra.findings
-                                        if f.get("profile_url") not in existing_urls
-                                    ]
-                                    prev.findings = list(prev.findings) + new_only
-                                    if prev.metadata and _msg_extra.metadata:
-                                        prev.metadata["whatsapp_followup"] = True
-                                else:
-                                    collected[_msg.name] = _msg_extra
-                        except Exception:
-                            pass
-
-            graph_data: dict | None = None
-            try:
-                from .identity_graph import IdentityGraph
-
-                _findings_flat = []
-                for _mod, _res in collected.items():
-                    if hasattr(_res, "findings"):
-                        for _f in _res.findings:
-                            _findings_flat.append({"module_name": _mod, "data": _f})
-                graph_data = IdentityGraph.build(
-                    {"email": email, "findings": _findings_flat}
-                ).to_d3()
-            except Exception:
-                graph_data = None
-
-            # Sort collected once, after every module has reported, so the
-            # exposure score and persisted finding order are independent of
-            # async completion order.
-            # NOTE: use a separate variable to avoid shadowing the closed-over
-            # `collected` in _run_and_persist — assigning to `collected` here
-            # would make Python treat it as a local throughout the function,
-            # causing UnboundLocalError on every earlier reference.
-            _final = _sort_collected(collected)
-
-            # Persist before sentinel so consumers see the final score in the DB.
-            self.status = InvestigationStatus.COMPLETE
-            try:
-                await self._persist(investigation_id, _final, started_at, graph_data)
-
-                # Dispatch webhooks if configured
-                try:
-                    from ..integrations.webhooks import WebhookDispatcher
-                    score = _compute_exposure_score(_final)
-                    await WebhookDispatcher().dispatch(email, score, _final)
-
-                    from ..config import settings
-                    if settings.integration_webhook_url:
-                        from ..core.service import InvestigationService, enrich_report
-                        from ..integrations.integration_webhook import IntegrationWebhookDispatcher
-                        
-                        async with AsyncSessionLocal() as session:
-                            svc = InvestigationService(session)
-                            data = await svc.get_investigation(investigation_id)
-                        
-                        if data:
-                            payload = enrich_report(data)
-                            await IntegrationWebhookDispatcher().dispatch(payload)
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Webhook dispatch failed: {e}")
-            except Exception:
-                self.status = InvestigationStatus.FAILED
-                await self._set_status(investigation_id, InvestigationStatus.FAILED)
-            finally:
-                await queue.put(None)
+                        from ..config import settings
+                        if settings.integration_webhook_url:
+                            from ..core.service import InvestigationService, enrich_report
+                            from ..integrations.integration_webhook import IntegrationWebhookDispatcher
+                            
+                            async with AsyncSessionLocal() as session:
+                                svc = InvestigationService(session)
+                                data = await svc.get_investigation(investigation_id)
+                            
+                            if data:
+                                payload = enrich_report(data)
+                                await IntegrationWebhookDispatcher().dispatch(payload)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"Webhook dispatch failed: {e}")
+                except Exception:
+                    self.status = InvestigationStatus.FAILED
+                    await self._set_status(investigation_id, InvestigationStatus.FAILED)
+                finally:
+                    await queue.put(None)
 
         asyncio.create_task(_run_and_persist())
         return queue

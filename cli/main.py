@@ -101,6 +101,12 @@ _HARDCODED_MODULES = [
     ("domain_intel",   "Multi",     "SHODAN_API_KEY",    "No", "Domain intelligence and infrastructure recon"),
 ]
 
+OPT_IN_MODULES = {
+    "breach_deep":       "enable_breach_deep",
+    "ghunt":             "enable_ghunt",
+    "email_discovery":   "enable_email_discovery",
+}
+
 
 # ── Global callback (banner) ──────────────────────────────────────────────────
 
@@ -415,15 +421,33 @@ async def _investigate(
     output_file: str | None,
     force: bool = False,
     show_collisions: bool = False,
+    enable: str | None = None,
 ) -> int:
     base_url = get_backend_url()
     out = err_console if output_format in ("json", "jsonl") else console
+
+    enable_modules_list = []
+    if enable:
+        if enable.strip().lower() == "all":
+            enable_modules_list = list(OPT_IN_MODULES.keys())
+        else:
+            for m in enable.split(","):
+                m_strip = m.strip()
+                if not m_strip:
+                    continue
+                if m_strip in OPT_IN_MODULES:
+                    enable_modules_list.append(m_strip)
+                else:
+                    err_console.print(f"[yellow]Unknown opt-in module: {m_strip}. Valid: {', '.join(OPT_IN_MODULES.keys())}[/yellow]")
 
     payload: dict[str, Any] = {"email": email}
     if modules:
         payload["modules"] = [m.strip() for m in modules.split(",") if m.strip()]
     if force:
         payload["force"] = True
+    if enable_modules_list:
+        payload["enable_modules"] = enable_modules_list
+        err_console.print(f"[dim]Opt-in modules enabled: {', '.join(enable_modules_list)}[/dim]")
 
     try:
         async with httpx.AsyncClient() as check_client:
@@ -1188,7 +1212,7 @@ def investigate(
         "table", "--format", "-f", help="Output format: table|json|jsonl"
     ),
     modules: str = typer.Option(
-        None, "--modules", "-m", help="Comma-separated list of modules to run."
+        None, "--modules", help="Comma-separated list of modules to run."
     ),
     timeout: int = typer.Option(
         30, "--timeout", "-t", help="Timeout in seconds for API calls."
@@ -1202,6 +1226,10 @@ def investigate(
     show_collisions: bool = typer.Option(
         False, "--show-collisions", help="Expands collision clusters in output."
     ),
+    enable: str = typer.Option(
+        None, "-m", "--enable",
+        help="Enable opt-in modules for this run. Comma-separated or 'all'. Example: -m breach_deep,whatsmyname"
+    ),
 ) -> None:
     """Run a full OSINT investigation against an email address.
     Exit codes: 0=clean 1=findings 2=breaches 3=error"""
@@ -1214,7 +1242,7 @@ def investigate(
     for i, target_email in enumerate(emails):
         if i > 0 and output_format not in ("json", "jsonl"):
             err_console.print("━" * 80)
-        code = asyncio.run(_investigate(target_email, output_format, modules, timeout, output_file, force, show_collisions))
+        code = asyncio.run(_investigate(target_email, output_format, modules, timeout, output_file, force, show_collisions, enable))
         if code > max_code:
             max_code = code
 

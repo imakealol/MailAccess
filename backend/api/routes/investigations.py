@@ -28,6 +28,7 @@ class InvestigateRequest(BaseModel):
     email: str
     modules: list[str] | None = None
     force: bool = False
+    enable_modules: list[str] = []
 
 
 class InvestigateResponse(BaseModel):
@@ -71,7 +72,7 @@ async def start_investigation(
     """
     service = InvestigationService(session)
     investigation_id, created_at, queue, cached = await service.create_investigation(
-        body.email, body.modules, force=body.force,
+        body.email, body.modules, force=body.force, enable_modules=body.enable_modules
     )
     if not cached and queue is not None:
         queue_registry.put(investigation_id, queue)

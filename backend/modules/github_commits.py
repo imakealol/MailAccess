@@ -70,8 +70,12 @@ class GitHubCommitsModule(BaseModule):
                 partial = partial or rate_limited
         except httpx.TimeoutException:
             return ModuleResult(status=ModuleStatus.PARTIAL, errors=["GitHub request timed out"])
+        except (httpx.ConnectError, httpx.NetworkError) as exc:
+            # True connection-level failure — network unreachable / DNS failure
+            return ModuleResult(status=ModuleStatus.FAILED, errors=[f"GitHub unreachable: {exc}"])
         except Exception as exc:
-            return ModuleResult(status=ModuleStatus.FAILED, errors=[str(exc)])
+            # Unexpected error; degrade to PARTIAL rather than FAILED
+            return ModuleResult(status=ModuleStatus.PARTIAL, errors=[f"GitHub unexpected error: {exc}"])
 
         commit_findings = [f for f in findings if f.get("platform") == "github_commit"]
         commit_dates = [
@@ -104,13 +108,20 @@ class GitHubCommitsModule(BaseModule):
                 languages.append(language)
                 repos_counted_for_language.add(repo)
 
+        # Determine final status:
+        # - PARTIAL if rate-limited, auth-blocked, or we have some data alongside errors
+        # - FAILED only for genuine connection-level failures (caught above and returned early)
+        # - SKIPPED is set upstream; we never set it here
         status = ModuleStatus.SUCCESS
         if partial:
+            # partial=True is set when auth/rate-limit blocked commit search —
+            # user search may still have run; this is never a FAILED
             status = ModuleStatus.PARTIAL
         elif errors and findings:
             status = ModuleStatus.PARTIAL
         elif errors and not findings:
-            status = ModuleStatus.FAILED
+            # errors with no findings = auth-blocked or empty result, not a crash
+            status = ModuleStatus.PARTIAL
 
         return ModuleResult(
             status=status,
@@ -148,6 +159,8 @@ class GitHubCommitsModule(BaseModule):
 
         if _is_rate_limited(response):
             return [], ["GitHub API rate limit reached during commit search"], True
+        if response.status_code in (403, 422) and "Authorization" not in headers:
+            return [], ["GitHub commit search requires GITHUB_TOKEN. Set via: mailaccess keys set GITHUB_TOKEN your-token-here"], True
         if response.status_code != 200:
             return [], [f"GitHub commit search returned {response.status_code}"], False
 

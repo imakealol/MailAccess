@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Permutation discovery — generates email variations from recovered names,
     # then probes each with Hudson Rock (+ HIBP if key is set)
     enable_permutation_discovery: bool = True
-    enable_email_discovery: bool = True
+    enable_email_discovery: bool = False
 
     # GHunt (opt-in — requires ghunt>=2.3 installed and a valid creds file from `ghunt login`)
     # Cookies expire periodically and require manual refresh via `ghunt login`.

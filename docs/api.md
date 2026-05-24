@@ -49,11 +49,14 @@ Start an investigation. Returns immediately with an ID — the investigation run
 {
   "email": "user@example.com",
   "modules": ["hibp", "gravatar"],
+  "enable_modules": ["breach_deep", "ghunt"],
   "force": false
 }
 ```
 
 `modules` is optional. Omit it to run all registered modules. Set `force: true` to bypass the investigation cache and always run a fresh investigation.
+
+`enable_modules` is a list of opt-in module names to enable for this run only. Equivalent to the CLI `-m` flag. Valid values: `breach_deep`, `ghunt`, `email_discovery`. Pass `["all"]` to enable all three opt-in modules.
 
 New modules available in 0.4.0: `breach_deep`, `email_discovery`, `wayback`, `github_commits`. Pass them in the `modules` array to run selectively:
 

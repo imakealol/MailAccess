@@ -93,7 +93,7 @@ Every setting is optional unless marked required.
 | `BREACH_DEEP_LIMIT` | `100` | Sites to probe; max 750 |
 | `BREACH_DEEP_FULL` | `false` | Probe all 750 HIBP sites |
 | `ENABLE_EMAIL_DISCOVERY` | `true` | Name-to-email dorks |
-| `GITHUB_TOKEN` | _(unset)_ | Optional; increases GitHub rate limits |
+| `GITHUB_TOKEN` | _(unset)_ | Optional. Required for GitHub commit author-email search. Without it, `github_commits` runs user profile search only. Get at: [github.com/settings/tokens](https://github.com/settings/tokens) |
 
 MailAccess fetches the HIBP breach corpus on startup and caches it at `data/cache/breach_corpus.json` for 24h. No API key required for this fetch.
 
@@ -137,6 +137,33 @@ All API keys are optional. Modules that require a missing key skip themselves wi
 | `VIRUSTOTAL_API_KEY` | Reserved for future module | https://virustotal.com |
 | `FULLCONTACT_API_KEY` | Reserved for future module | https://fullcontact.com |
 | `CLEARBIT_API_KEY` | Reserved for future module | https://clearbit.com |
+
+---
+
+## Enabling Opt-in Modules
+
+Three modules are opt-in and require explicit enabling per run or via `.env`:
+
+| Module | Description |
+|--------|-------------|
+| `breach_deep` | Probes 100 breach sites (slow, ~90 s) |
+| `ghunt` | Deep Gmail intel (requires one-time `ghunt login` setup) |
+| `email_discovery` | Name → email dorks (requires `SERPAPI_KEY`) |
+
+**Enable for one run** using the `-m` / `--enable` flag:
+
+```bash
+mailaccess investigate email -m breach_deep
+mailaccess investigate email -m all
+```
+
+**Enable permanently** via `.env`:
+
+```env
+ENABLE_BREACH_DEEP=true
+```
+
+`-m all` enables all three opt-in modules for the current run only.
 
 ---
 
