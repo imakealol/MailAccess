@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ...core.breach_normalizer import collapse_breach_findings
 from ...core.identity_graph import IdentityGraph
 from ...db.database import get_db
 from ...db.models import Investigation
@@ -43,10 +44,10 @@ async def get_investigation_graph(
 
     graph_input = {
         "email": inv.email,
-        "findings": [
+        "findings": collapse_breach_findings([
             {"module_name": f.module_name, "data": f.data}
             for f in inv.findings
-        ],
+        ]),
     }
     graph = IdentityGraph.build(graph_input)
     d3 = graph.to_d3()
@@ -75,10 +76,10 @@ async def get_investigation_clusters(
             detail="Investigation not complete — clusters not yet available",
         )
 
-    raw_findings = [
+    raw_findings = collapse_breach_findings([
         {"module_name": f.module_name, "data": f.data}
         for f in inv.findings
-    ]
+    ])
     graph_input = {
         "email": inv.email,
         "findings": raw_findings,

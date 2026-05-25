@@ -23,4 +23,5 @@ class JsonExporter(BaseExporter):
 
     def export(self, investigation_id: str, data: dict[str, Any]) -> bytes:
         payload = {"investigation_id": investigation_id, **data}
+        payload.pop("credential_risk", None)
         return json.dumps(payload, cls=CustomJSONEncoder, indent=2).encode("utf-8")

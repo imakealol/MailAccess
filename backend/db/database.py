@@ -33,12 +33,25 @@ def _migrate_add_graph_data(sync_conn) -> None:
         )
 
 
+def _migrate_add_credential_risk_score(sync_conn) -> None:
+    """Add credential_risk_score column to investigations if missing."""
+    inspector = inspect(sync_conn)
+    if "investigations" not in inspector.get_table_names():
+        return
+    columns = {col["name"] for col in inspector.get_columns("investigations")}
+    if "credential_risk_score" not in columns:
+        sync_conn.execute(
+            text("ALTER TABLE investigations ADD COLUMN credential_risk_score INTEGER")
+        )
+
+
 async def init_db() -> None:
     """Create all tables if they don't exist. Called once at app startup."""
     _ensure_db_dir()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_migrate_add_graph_data)
+        await conn.run_sync(_migrate_add_credential_risk_score)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

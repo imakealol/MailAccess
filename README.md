@@ -10,7 +10,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](docker-compose.yml)
-[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.4.3&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
+[![PyPI version](https://img.shields.io/static/v1?label=PyPI&message=0.5.1&color=3775A9&logo=pypi&logoColor=white)](https://pypi.org/project/mailaccess/)
 [![PyPI Downloads](https://img.shields.io/pypi/dm/mailaccess)](https://pypi.org/project/mailaccess/)
 
 Self-hostable OSINT platform for investigating email addresses. Fan out across breach databases, social networks, DNS records, and the open web — get back a unified exposure score and structured findings you can export or pipe into Maltego.
@@ -67,6 +67,7 @@ mailaccess investigate email -m all
 - **Deep breach mode** — checks top 100 highest-severity breached sites for account existence
 - **Historical intelligence** — Wayback Machine archive search + GitHub commit author search
 - **Recursive email discovery** — recovers other emails owned by the same person via name correlation
+- **Credential Risk Score** — separate 0-100 credential risk signal with LOW / MODERATE / HIGH / CRITICAL banding, top drivers, and recommended next steps
 - Concurrent module execution — all modules run in parallel, results stream as they arrive
 - WebSocket streaming — partial results arrive in real time without polling
 - REST API + web UI + CLI — use whatever interface fits your workflow
@@ -93,6 +94,9 @@ mailaccess investigate email -m all
 | whois_lookup | Domain WHOIS, privacy detection | No | No |
 | wayback | Finds historical pages where email appeared publicly via Wayback Machine CDX | No | No |
 | github_commits | Finds repos committed to with this email, surfaces real name from git config. Requires GITHUB_TOKEN for commit search; user profile search works without token. | No (GITHUB_TOKEN optional, required for commit search) | No |
+| xposedornot | Default-on direct email-to-breach corpus lookup with breach names, data classes, and risk indicators | No | No |
+| leakcheck | Default-on public breach corpus lookup with regional coverage and stealer routing | No | No |
+| ransomware_intel | Default-on domain victim correlation against ransomware lists; skips free providers | No | No |
 | social | 13 platforms via YAML | No | No |
 | social_links | Username extraction, feeds pivot | No | No |
 | account_discovery | Holehe 120+ platforms | No | Yes |
@@ -106,7 +110,7 @@ mailaccess investigate email -m all
 | ghunt | Gmail deep intel | No (setup required) | Yes |
 | identity_graph | Cross-platform cluster analysis | No | No (automatic) |
 
-> 24 modules, 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
+> 28 modules, 800+ platforms checked when all opt-in modules enabled. YAML platform system — add new platforms via PR, no Python required.
 
 ## Identity Graph
 
@@ -235,6 +239,21 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 | `DISCORD_WEBHOOK_URL` | Webhooks | Discord server settings | No |
 
 ## Changelog
+
+### 0.5.1
+
+- LeakCheck integration: free corpus lookup, covers CIS/regional breaches XposedOrNot misses
+- XposedOrNot paste signals surfaced separately from breach signals in CLI and summary bar
+- Ransomware domain victim correlation: checks email domain against ransomware victim lists (ransomware.live + ransomlook.io)
+- Summary bar now shows three-part breakdown: Breaches: X | Pastes: Y | Stealer: Z
+- LeakCheck stealer category correctly routed to stealer signal count not breach count
+- Removed legacy credential_risk: null from JSON export
+
+### 0.5.0
+
+- XposedOrNot integration: free direct breach corpus lookup, no API key, default-on, closes ~70-80% of HIBP coverage gap
+- Breach normalizer: deduplicates breach findings across all sources into single canonical records with source attribution
+- Credential Risk Score: separate 0-100 score with band, top 3 score drivers, and recommended analyst actions. Infostealer hit forces CRITICAL. Surfaces in CLI, UI, all exports, and webhooks.
 
 ### 0.4.3
 

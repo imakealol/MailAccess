@@ -99,6 +99,7 @@ _HARDCODED_MODULES = [
     ("whois_lookup",   "WHOIS",     "—",                 "No", "WHOIS registration data for email domain"),
     ("social_links",   "Multi",     "—",                 "No", "Check email on social platforms"),
     ("domain_intel",   "Multi",     "SHODAN_API_KEY",    "No", "Domain intelligence and infrastructure recon"),
+    ("ransomware_intel", "Ransomware", "—",              "No", "Check if domain is a ransomware victim"),
 ]
 
 OPT_IN_MODULES = {
@@ -559,6 +560,16 @@ async def _investigate(
                     risk = summary.get("risk_level")
             return str(risk) if risk is not None else "unknown"
 
+        def _get_credential_score(rep: dict[str, Any]) -> int | float | None:
+            score = rep.get("credential_risk_score")
+            if isinstance(score, (int, float)):
+                return score
+            return None
+
+        def _get_credential_band(rep: dict[str, Any]) -> str:
+            band = rep.get("credential_risk_band")
+            return str(band) if band is not None else "UNKNOWN"
+
         _progress_table = Table(title="Module Progress", box=None)
 
         def update_progress_table(rep: dict[str, Any]) -> Table:
@@ -592,6 +603,8 @@ async def _investigate(
         def render_summary(rep: dict[str, Any]) -> None:
             score = _get_score(rep)
             risk = _get_risk(rep)
+            credential_score = _get_credential_score(rep)
+            credential_band = _get_credential_band(rep)
             findings_count = len(rep.get("findings", []))
             
             module_runs = rep.get("module_runs", [])
@@ -606,10 +619,43 @@ async def _investigate(
             
             risk_color = get_risk_color(risk)
             score_color = _score_color(score if isinstance(score, int) else None)
+            credential_color = _score_color(
+                credential_score if isinstance(credential_score, int) else None
+            )
+            credential_summary = (
+                f"{credential_score} {credential_band}"
+                if credential_score is not None
+                else f"N/A {credential_band}"
+            )
+            def _finding_payload(finding: dict[str, Any]) -> dict[str, Any]:
+                data = finding.get("data")
+                return data if isinstance(data, dict) else finding
+
+            breach_count = 0
+            paste_count = 0
+            stealer_count = 0
+            for f in rep.get("findings", []):
+                if not isinstance(f, dict):
+                    continue
+                payload = _finding_payload(f)
+                mod = str(f.get("module_name", "")).lower()
+                src = str(payload.get("source", "")).lower()
+                plat = str(payload.get("platform", "")).lower()
+                sig = str(payload.get("signal_type", "")).lower()
+                
+                if sig == "stealer_signal" or mod == "hudson_rock" or src == "hudson_rock":
+                    stealer_count += 1
+                elif sig == "paste_exposure" or src == "xposedornot_pastes":
+                    paste_count += 1
+                elif any(m in (src, plat, mod) for m in ("hibp", "breachdirectory", "hudson_rock", "haveibeenpwned", "breach_deep", "xposedornot")):
+                    if mod != "hudson_rock" and src != "hudson_rock":
+                        breach_count += 1
+
             summary = (
-                f" [bold]Score:[/] [{score_color}]{score_str}[/]  │  "
-                f"[bold]Risk:[/] [{risk_color}]{risk.upper()}[/]  │  "
-                f"[bold]Hits:[/] {findings_count} "
+                f" [bold]Exposure:[/] [{score_color}]{score_str}[/]  |  "
+                f"[bold]Cred Risk:[/] [{credential_color}]{credential_summary}[/]  |  "
+                f"[bold]Risk:[/] [{risk_color}]{risk.upper()}[/]  |  "
+                f"[bold]Breaches:[/] {breach_count} | [bold]Pastes:[/] {paste_count} | [bold]Stealer:[/] {stealer_count} "
             )
             out.print(Panel(summary, border_style=score_color))
             if skipped_count > 3:
@@ -785,21 +831,62 @@ async def _investigate(
                     if real_name or active or primary_language:
                         out.print()
 
+                def _render_ransomware_intel(findings: list[Any]) -> None:
+                    usable = [f for f in findings if isinstance(f, dict)]
+                    out.print(Rule(f"RANSOMWARE INTEL  ({len(usable)} hits)", style="red"))
+                    for finding in usable:
+                        f_meta = finding.get("metadata", {})
+                        group = str(f_meta.get("group_name") or "Unknown Group")
+                        date = str(f_meta.get("attack_date") or "Unknown Date")
+                        note = str(f_meta.get("note") or "")
+                        domain = str(f_meta.get("domain") or "")
+                        out.print(f"  [red]⚠[/red] {group} [dim]Date: {date} · Domain: {domain}[/dim]")
+                        if note:
+                            out.print(f"    [dim][yellow]{note}[/yellow][/dim]")
+                    out.print()
+
+                def _render_paste_exposure(findings: list[Any]) -> None:
+                    usable = [f for f in findings if isinstance(f, dict)]
+                    out.print(Rule(f"PASTE EXPOSURE  ({len(usable)} hits)", style="cyan"))
+                    for finding in usable:
+                        f_meta = finding.get("metadata", {})
+                        source = str(f_meta.get("paste_source") or finding.get("platform") or "Paste")
+                        date = f_meta.get("date")
+                        emails = f_meta.get("email_count") or f_meta.get("emails_count")
+                        date_str = f"Date: {_date_year(date) if date else 'Unknown'}"
+                        email_str = f" · Emails: {emails}" if emails else ""
+                        out.print(f"  [yellow]⚠[/yellow] {source[:30]:<30} [dim]{date_str}{email_str}[/dim]")
+                    out.print()
+
+                paste_findings = []
                 for module_name, findings in findings_by_module.items():
+                    paste_findings.extend([f for f in findings if isinstance(f, dict) and f.get("signal_type") == "paste_exposure"])
+                
+                if paste_findings:
+                    _render_paste_exposure(paste_findings)
+
+                for module_name, findings in findings_by_module.items():
+                    non_paste_findings = [f for f in findings if not (isinstance(f, dict) and f.get("signal_type") == "paste_exposure")]
+                    if not non_paste_findings:
+                        continue
+
                     if module_name == "breach_deep":
-                        _render_breach_deep(findings)
+                        _render_breach_deep(non_paste_findings)
                         continue
                     if module_name == "email_discovery":
-                        _render_email_discovery(findings)
+                        _render_email_discovery(non_paste_findings)
                         continue
                     if module_name == "wayback":
-                        _render_wayback(findings)
+                        _render_wayback(non_paste_findings)
                         continue
                     if module_name == "github_commits":
-                        _render_github_commits(findings)
+                        _render_github_commits(non_paste_findings)
                         continue
-                    out.print(Rule(f"{_normalize_module_name(module_name)}  ({len(findings)} hits)", style="cyan"))
-                    for finding in findings:
+                    if module_name == "ransomware_intel":
+                        _render_ransomware_intel(non_paste_findings)
+                        continue
+                    out.print(Rule(f"{_normalize_module_name(module_name)}  ({len(non_paste_findings)} hits)", style="cyan"))
+                    for finding in non_paste_findings:
                         if not isinstance(finding, dict):
                             continue
                         confidence = str(finding.get("confidence", "")).lower()
@@ -848,6 +935,9 @@ async def _investigate(
                             value = finding.get(key)
                             if value:
                                 metadata.append(f"{key}: {value}")
+                        sources = finding.get("sources")
+                        if isinstance(sources, list) and len(sources) > 1:
+                            metadata.append(f"sources: {json.dumps(sources)}")
                         if confidence == "low":
                             metadata.append("low confidence")
                         if metadata:
@@ -867,6 +957,7 @@ async def _investigate(
                     "breachdirectory",
                     "hudson_rock",
                     "breach_deep",
+                    "ransomware_intel",
                 ],
                 "RECON MODULES": ["dns_lookup", "whois_lookup", "domain_intel", "google_dork", "email_discovery", "wayback", "github_commits", "shodan", "hunter_io"],
                 "OPTIONAL MODULES": ["ghunt", "user_scanner", "account_discovery", "whatsmyname", "username_pivot", "permutation_discovery", "phone_intel"]
@@ -969,22 +1060,8 @@ async def _investigate(
                                     _ws_modules[mod] = {"module_name": mod}
                                 _ws_modules[mod]["status"] = event.get("status", "complete")
                                 _ws_modules[mod]["completed_at"] = datetime.now(timezone.utc).isoformat()
-                                if output_format == "jsonl" and event.get("findings"):
-                                    for f in event["findings"]:
-                                        if not isinstance(f, dict): continue
-                                        finding_obj = {
-                                            "email": email,
-                                            "investigation_id": inv_id,
-                                            "module": mod,
-                                            "platform": str(f.get("platform") or f.get("service") or f.get("source") or f.get("site") or mod),
-                                            "profile_url": str(f.get("url") or f.get("profile_url") or f.get("link") or ""),
-                                            "confidence": f.get("confidence", "unknown"),
-                                            "severity": f.get("severity", "info"),
-                                            "metadata": {k: v for k, v in f.items() if k not in ("platform", "service", "source", "site", "url", "profile_url", "link", "confidence", "severity")},
-                                            "timestamp": datetime.now(timezone.utc).isoformat()
-                                        }
-                                        sys.stdout.write(json.dumps(finding_obj) + "\n")
-                                    sys.stdout.flush()
+                                # JSONL is emitted from the final merged report below so
+                                # breach findings only appear once, with the richest metadata.
                             elif ev_type == "investigation_complete":
                                 status = "complete"
                             if _ws_modules and _live:
@@ -1095,30 +1172,57 @@ async def _investigate(
             exit_code = 1
 
         if output_format == "jsonl":
-            if cached:
-                # If cached, WS didn't stream, so stream from report now
-                for mod, findings in report_data.get("findings_by_module", {}).items():
-                    for f in findings:
-                        if not isinstance(f, dict): continue
-                        finding_obj = {
-                            "email": email,
-                            "investigation_id": inv_id,
-                            "module": mod,
-                            "platform": str(f.get("platform") or f.get("service") or f.get("source") or f.get("site") or mod),
-                            "profile_url": str(f.get("url") or f.get("profile_url") or f.get("link") or ""),
-                            "confidence": f.get("confidence", "unknown"),
-                            "severity": f.get("severity", "info"),
-                            "metadata": {k: v for k, v in f.items() if k not in ("platform", "service", "source", "site", "url", "profile_url", "link", "confidence", "severity")},
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
-                        sys.stdout.write(json.dumps(finding_obj) + "\n")
+            for mod, findings in report_data.get("findings_by_module", {}).items():
+                for f in findings:
+                    if not isinstance(f, dict):
+                        continue
+                    finding_obj = {
+                        "email": email,
+                        "investigation_id": inv_id,
+                        "module": mod,
+                        "platform": str(
+                            f.get("platform")
+                            or f.get("service")
+                            or f.get("source")
+                            or f.get("site")
+                            or mod
+                        ),
+                        "profile_url": str(
+                            f.get("url") or f.get("profile_url") or f.get("link") or ""
+                        ),
+                        "confidence": f.get("confidence", "unknown"),
+                        "severity": f.get("severity", "info"),
+                        "metadata": {
+                            k: v
+                            for k, v in f.items()
+                            if k
+                            not in (
+                                "platform",
+                                "service",
+                                "source",
+                                "site",
+                                "url",
+                                "profile_url",
+                                "link",
+                                "confidence",
+                                "severity",
+                            )
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    sys.stdout.write(json.dumps(finding_obj) + "\n")
+            sys.stdout.flush()
             score = _get_score(report_data)
             risk = _get_risk(report_data)
+            credential_score = _get_credential_score(report_data)
+            credential_band = _get_credential_band(report_data)
             sys.stdout.write(json.dumps({
                 "type": "complete",
                 "email": email,
                 "score": score,
                 "risk": risk,
+                "credential_risk_score": credential_score,
+                "credential_risk_band": credential_band,
                 "total_findings": findings_count
             }) + "\n")
             sys.stdout.flush()

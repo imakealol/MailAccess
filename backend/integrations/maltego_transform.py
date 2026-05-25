@@ -209,7 +209,7 @@ def _collect_entities(data: dict[str, Any]) -> list[dict[str, Any]]:
         module_name = f.get("module_name", "")
         metadata = f_data.get("metadata", {}) or {}
 
-        if module_name == "haveibeenpwned" or "breach_name" in f_data:
+        if module_name in ("haveibeenpwned", "hibp", "xposedornot") or "breach_name" in f_data:
             breach_name = f_data.get("breach_name", "Unknown")
             breach_date = f_data.get("breach_date", "")
             label = (

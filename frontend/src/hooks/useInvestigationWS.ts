@@ -34,7 +34,12 @@ export function useInvestigationWS(investigationId: string | null) {
           store.handleWsModuleError(frame.module, frame.error)
           break
         case 'investigation_complete':
-          store.handleWsComplete(frame.exposure_score, frame.risk_level)
+          store.handleWsComplete(
+            frame.exposure_score,
+            frame.risk_level,
+            frame.credential_risk_score,
+            frame.credential_risk_band
+          )
           break
         case 'error':
           // Queue already consumed (historical view) — ignore

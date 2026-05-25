@@ -15,9 +15,14 @@ def _utcnow() -> datetime:
 def _parse_date(value: Any) -> datetime | None:
     if not value or not isinstance(value, str):
         return None
-    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S.%f%z"):
+    for fmt in (
+        "%Y-%m-%d",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+    ):
         try:
-            dt = datetime.strptime(value[:26], fmt[:len(value[:26])])
+            dt = datetime.strptime(value[:26], fmt[: len(value[:26])])
             return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
         except ValueError:
             continue
@@ -43,6 +48,10 @@ class StixExporter(BaseExporter):
         published: datetime = _parse_date(data.get("created_at")) or _utcnow()
         findings: list[dict] = data.get("findings", [])
         module_runs: list[dict] = data.get("module_runs", [])
+        credential_score = data.get("credential_risk_score")
+        credential_band = data.get("credential_risk_band", "UNKNOWN")
+        score_drivers = data.get("score_drivers", [])
+        recommended_actions = data.get("recommended_actions", [])
 
         stix_objects: list[Any] = []
         all_ids: list[str] = []
@@ -52,10 +61,8 @@ class StixExporter(BaseExporter):
             all_ids.append(obj.id)
             return obj
 
-        # EmailAddress SCO — anchor object for all relationships
         email_sco = register(stix2.EmailAddress(value=email))
 
-        # Dedup helpers
         names_seen: set[str] = set()
         accounts_seen: set[tuple[str, str]] = set()
         domains_seen: set[str] = set()
@@ -65,11 +72,11 @@ class StixExporter(BaseExporter):
         breach_notes: list[Any] = []
 
         def add_identity(name: str) -> Any | None:
-            n = (name or "").strip()
-            if not n or n in names_seen:
+            cleaned = (name or "").strip()
+            if not cleaned or cleaned in names_seen:
                 return None
-            names_seen.add(n)
-            obj = register(stix2.Identity(name=n, identity_class="individual"))
+            names_seen.add(cleaned)
+            obj = register(stix2.Identity(name=cleaned, identity_class="individual"))
             identities.append(obj)
             return obj
 
@@ -78,17 +85,17 @@ class StixExporter(BaseExporter):
             username: str,
             display_name: str | None = None,
         ) -> Any | None:
-            u = (username or "").strip()
-            p = (platform or "").strip()
-            if not u or not p:
+            cleaned_user = (username or "").strip()
+            cleaned_platform = (platform or "").strip()
+            if not cleaned_user or not cleaned_platform:
                 return None
-            key = (_account_type(p), u.lower())
+            key = (_account_type(cleaned_platform), cleaned_user.lower())
             if key in accounts_seen:
                 return None
             accounts_seen.add(key)
             kwargs: dict[str, Any] = {
-                "user_id": u,
-                "account_type": _account_type(p),
+                "user_id": cleaned_user,
+                "account_type": _account_type(cleaned_platform),
             }
             if display_name:
                 kwargs["display_name"] = display_name
@@ -97,32 +104,39 @@ class StixExporter(BaseExporter):
             return obj
 
         def add_domain(domain: str) -> Any | None:
-            d = (domain or "").strip().lower()
-            if not d or d in domains_seen:
+            cleaned = (domain or "").strip().lower()
+            if not cleaned or cleaned in domains_seen:
                 return None
-            domains_seen.add(d)
-            obj = register(stix2.DomainName(value=d))
-            return obj
+            domains_seen.add(cleaned)
+            return register(stix2.DomainName(value=cleaned))
 
-        # DomainName from domain_intel module run metadata
         for run in module_runs:
             if run.get("module_name") == "domain_intel":
                 meta = run.get("run_metadata") or {}
                 if not meta.get("is_free_provider"):
                     add_domain(meta.get("domain", ""))
 
-        # Process findings
         for finding in findings:
             module_name: str = finding.get("module_name", "")
-            fdata: dict = finding.get("data") or {}
-            platform: str = fdata.get("platform", "")
-            meta: dict = fdata.get("metadata") or {}
+            f_data: dict = finding.get("data") or {}
+            platform: str = f_data.get("platform", "")
+            meta: dict = f_data.get("metadata") or {}
 
-            if module_name in ("hibp", "haveibeenpwned"):
-                breach_name = (meta.get("name") or "Unknown Breach").strip()
-                data_classes: list[str] = meta.get("data_classes") or []
+            if module_name in ("hibp", "haveibeenpwned", "xposedornot"):
+                breach_name = (
+                    meta.get("breach_name")
+                    or meta.get("name")
+                    or f_data.get("breach_name")
+                    or "Unknown Breach"
+                ).strip()
+                data_classes: list[str] = (
+                    meta.get("data_classes")
+                    or meta.get("exposed_data")
+                    or f_data.get("data_classes")
+                    or []
+                )
                 content = (
-                    f"{breach_name} — {', '.join(data_classes)}"
+                    f"{breach_name} - {', '.join(data_classes)}"
                     if data_classes
                     else breach_name
                 )
@@ -145,53 +159,78 @@ class StixExporter(BaseExporter):
                 if username:
                     add_user_account(platform, username, display_name)
 
-                # Gravatar profile links accounts on other platforms
                 if module_name == "gravatar":
-                    for acc in (meta.get("accounts") or []):
-                        shortname = acc.get("shortname", "")
-                        acc_display = (
-                            acc.get("display")
-                            or acc.get("username")
-                            or acc.get("shortname", "")
+                    for account in meta.get("accounts") or []:
+                        shortname = account.get("shortname", "")
+                        account_display = (
+                            account.get("display")
+                            or account.get("username")
+                            or account.get("shortname", "")
                         )
-                        if shortname and acc_display:
-                            add_user_account(shortname, acc_display)
+                        if shortname and account_display:
+                            add_user_account(shortname, account_display)
 
-                # Social module emits "Gravatar Linked: <platform>" findings
                 if "gravatar linked:" in platform.lower():
-                    acc_display = meta.get("display") or meta.get("username") or meta.get("shortname")
-                    if acc_display:
-                        add_user_account(platform, acc_display)
+                    account_display = (
+                        meta.get("display")
+                        or meta.get("username")
+                        or meta.get("shortname")
+                    )
+                    if account_display:
+                        add_user_account(platform, account_display)
 
             elif module_name == "domain_intel":
-                # WHOIS registrant name → Identity
                 registrant_name: str | None = meta.get("registrant_name")
                 if registrant_name:
                     add_identity(registrant_name)
 
-        # Relationships
-        for ua in user_accounts:
-            register(stix2.Relationship(
-                relationship_type="related-to",
-                source_ref=email_sco.id,
-                target_ref=ua.id,
-            ))
-        for ident in identities:
-            register(stix2.Relationship(
-                relationship_type="attributed-to",
-                source_ref=email_sco.id,
-                target_ref=ident.id,
-            ))
+        for account in user_accounts:
+            register(
+                stix2.Relationship(
+                    relationship_type="related-to",
+                    source_ref=email_sco.id,
+                    target_ref=account.id,
+                )
+            )
+        for identity in identities:
+            register(
+                stix2.Relationship(
+                    relationship_type="attributed-to",
+                    source_ref=email_sco.id,
+                    target_ref=identity.id,
+                )
+            )
         for note in breach_notes:
-            register(stix2.Relationship(
+            register(
+                stix2.Relationship(
+                    relationship_type="related-to",
+                    source_ref=email_sco.id,
+                    target_ref=note.id,
+                )
+            )
+
+        credential_note = register(
+            stix2.Note(
+                content=(
+                    f"Credential risk: {credential_score if credential_score is not None else 'N/A'}/100 "
+                    f"({credential_band})\n"
+                    f"Drivers: {'; '.join(str(item) for item in score_drivers) or 'none'}\n"
+                    f"Recommended actions: {'; '.join(str(item) for item in recommended_actions) or 'none'}"
+                ),
+                abstract="Credential Risk Assessment",
+                object_refs=[email_sco.id],
+            )
+        )
+        register(
+            stix2.Relationship(
                 relationship_type="related-to",
                 source_ref=email_sco.id,
-                target_ref=note.id,
-            ))
+                target_ref=credential_note.id,
+            )
+        )
 
-        # Report SDO — references every object registered so far
         report = stix2.Report(
-            name=f"MailAccess: {email}",
+            name=f"MailAccess: {email} ({credential_band} credential risk)",
             published=published,
             object_refs=list(all_ids),
         )

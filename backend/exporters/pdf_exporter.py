@@ -44,38 +44,49 @@ class PdfExporter(BaseExporter):
         html_content = self._build_html(investigation_id, data)
         return await asyncio.to_thread(self._render_pdf, html_content)
 
-    # deferred import keeps WeasyPrint out of module-load path
     def _render_pdf(self, html_content: str) -> bytes:
         from weasyprint import HTML  # type: ignore[import-untyped]
-        return HTML(string=html_content).write_pdf()  # type: ignore[no-any-return]
 
-    # ── HTML assembly ────────────────────────────────────────────────────────
+        return HTML(string=html_content).write_pdf()  # type: ignore[no-any-return]
 
     def _build_html(self, investigation_id: str, data: dict[str, Any]) -> str:
         email = data.get("email", "unknown")
         score = data.get("exposure_score")
         risk = data.get("risk_level", "unknown")
+        credential_score = data.get("credential_risk_score")
+        credential_band = data.get("credential_risk_band", "UNKNOWN")
         risk_class = _RISK_CLASS.get(risk, "risk-unknown")
         summary = data.get("summary", "")
 
         findings = data.get("findings", [])
         total_findings = len(findings)
         breach_count = sum(
-            1 for f in findings
-            if f.get("module_name", "").lower() in ("hibp", "haveibeenpwned")
+            1
+            for finding in findings
+            if finding.get("module_name", "").lower()
+            in ("hibp", "haveibeenpwned", "xposedornot")
         )
 
         runs = data.get("module_runs", [])
         modules_run = len(runs)
-        modules_failed = sum(1 for r in runs if r.get("status") == "failed")
+        modules_failed = sum(1 for run in runs if run.get("status") == "failed")
         findings_by_module = data.get("findings_by_module", {})
+        score_drivers = data.get("score_drivers", [])
+        recommended_actions = data.get("recommended_actions", [])
 
-        score_display = str(score) if score is not None else "—"
+        score_display = str(score) if score is not None else "-"
+        credential_display = str(credential_score) if credential_score is not None else "-"
         generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
         findings_html = self._findings_html(findings_by_module, runs)
         metadata_html = self._metadata_table_html(findings)
         log_html = self._module_log_html(runs, findings_by_module)
+        driver_html = self._string_list_html(
+            score_drivers, empty="No credential risk drivers recorded."
+        )
+        action_html = self._string_list_html(
+            recommended_actions, empty="No credential follow-up actions recorded."
+        )
 
         return f"""<!DOCTYPE html>
 <html lang="en">
@@ -102,6 +113,11 @@ class PdfExporter(BaseExporter):
       <div style="font-size:7pt;color:#718096;margin-top:4px">exposure score / 100</div>
     </div>
   </div>
+  <div class="credential-row">
+    <div class="credential-pill">
+      Credential Risk: <strong>{_e(credential_display)}/100</strong> {_e(credential_band)}
+    </div>
+  </div>
   <div class="stat-pills">
     <div class="pill"><strong>{_e(total_findings)}</strong>&nbsp;findings</div>
     <div class="pill"><strong>{_e(breach_count)}</strong>&nbsp;breaches</div>
@@ -110,6 +126,12 @@ class PdfExporter(BaseExporter):
   </div>
   <p class="summary-text">{_e(summary)}</p>
 </section>
+
+<h2>Credential Risk Drivers</h2>
+{driver_html}
+
+<h2>Recommended Actions</h2>
+{action_html}
 
 <h2>Findings by Module</h2>
 {findings_html}
@@ -123,33 +145,38 @@ class PdfExporter(BaseExporter):
 </body>
 </html>"""
 
-    def _findings_html(
-        self, findings_by_module: dict[str, list], runs: list[dict]
-    ) -> str:
+    def _string_list_html(self, values: list[Any], *, empty: str) -> str:
+        if not values:
+            return f'<p class="empty">{_e(empty)}</p>'
+        items = "".join(f"<li>{_e(value)}</li>" for value in values)
+        return f"<ul>{items}</ul>"
+
+    def _findings_html(self, findings_by_module: dict[str, list], runs: list[dict]) -> str:
         if not findings_by_module:
             return '<p class="empty">No findings recorded.</p>'
 
-        runs_by_module = {r.get("module_name"): r for r in runs}
+        runs_by_module = {run.get("module_name"): run for run in runs}
         parts: list[str] = []
 
         for module_name, module_findings in findings_by_module.items():
             run_info = runs_by_module.get(module_name, {})
             status = run_info.get("status", "unknown")
             status_class = _STATUS_CLASS.get(status, "status-unknown")
-            cards = "".join(self._finding_card(f) for f in module_findings)
-
-            parts.append(f"""
+            cards = "".join(self._finding_card(finding) for finding in module_findings)
+            parts.append(
+                f"""
 <div class="module-section">
   <div class="module-header">
     <span class="module-name">{_e(module_name)}</span>
     <span class="status-badge {status_class}">{_e(status)}</span>
   </div>
   {cards}
-</div>""")
+</div>"""
+            )
 
         return "\n".join(parts)
 
-    def _finding_card(self, f_data: dict) -> str:
+    def _finding_card(self, f_data: dict[str, Any]) -> str:
         platform = f_data.get("platform", "Unknown Platform")
         profile_url = f_data.get("profile_url") or ""
         confidence = str(f_data.get("confidence", "")).lower()
@@ -166,10 +193,10 @@ class PdfExporter(BaseExporter):
         )
 
         meta_rows = "".join(
-            f'<tr><td class="meta-key">{_e(k)}</td>'
-            f'<td class="meta-val">{_e(v)}</td></tr>'
-            for k, v in metadata.items()
-            if v is not None and v != ""
+            f'<tr><td class="meta-key">{_e(key)}</td>'
+            f'<td class="meta-val">{_e(value)}</td></tr>'
+            for key, value in metadata.items()
+            if value is not None and value != ""
         )
         meta_html = (
             f'<table class="meta-table"><tbody>{meta_rows}</tbody></table>'
@@ -187,37 +214,40 @@ class PdfExporter(BaseExporter):
   {meta_html}
 </div>"""
 
-    def _metadata_table_html(self, findings: list[dict]) -> str:
+    def _metadata_table_html(self, findings: list[dict[str, Any]]) -> str:
         rows: list[tuple[str, str, str]] = []
         seen: set[tuple[str, str, str]] = set()
 
-        _type_map = {
-            "name": lambda k: "name" in k and "username" not in k,
-            "username": lambda k: "username" in k,
-            "photo": lambda k: any(t in k for t in ("photo", "avatar", "image", "thumbnail")),
-            "phone": lambda k: "phone" in k,
-            "location": lambda k: "location" in k,
+        type_map = {
+            "name": lambda key: "name" in key and "username" not in key,
+            "username": lambda key: "username" in key,
+            "photo": lambda key: any(
+                token in key for token in ("photo", "avatar", "image", "thumbnail")
+            ),
+            "phone": lambda key: "phone" in key,
+            "location": lambda key: "location" in key,
         }
 
-        for f in findings:
-            mod = f.get("module_name", "unknown")
-            f_data = f.get("data", {})
+        for finding in findings:
+            module_name = finding.get("module_name", "unknown")
+            f_data = finding.get("data", {})
             meta = f_data.get("metadata", {}) if isinstance(f_data, dict) else {}
 
-            for k, v in meta.items():
-                if not v:
+            for key, value in meta.items():
+                if not value:
                     continue
-                k_lower = k.lower()
+                key_lower = key.lower()
                 data_type = next(
-                    (dt for dt, test in _type_map.items() if test(k_lower)), None
+                    (candidate for candidate, test in type_map.items() if test(key_lower)),
+                    None,
                 )
                 if data_type is None:
                     continue
-                for val in (v if isinstance(v, list) else [v]):
-                    val_str = str(val).strip()
-                    if not val_str:
+                for item in (value if isinstance(value, list) else [value]):
+                    value_str = str(item).strip()
+                    if not value_str:
                         continue
-                    sig = (data_type, val_str, mod)
+                    sig = (data_type, value_str, module_name)
                     if sig not in seen:
                         seen.add(sig)
                         rows.append(sig)
@@ -225,10 +255,10 @@ class PdfExporter(BaseExporter):
         if not rows:
             return '<p class="empty">No structured data points recovered.</p>'
 
-        rows.sort(key=lambda x: (x[0], x[1]))
+        rows.sort(key=lambda item: (item[0], item[1]))
         row_html = "".join(
-            f"<tr><td>{_e(dt)}</td><td>{_e(val)}</td><td>{_e(src)}</td></tr>"
-            for dt, val, src in rows
+            f"<tr><td>{_e(data_type)}</td><td>{_e(value)}</td><td>{_e(source)}</td></tr>"
+            for data_type, value, source in rows
         )
         return (
             "<table>"
@@ -237,28 +267,26 @@ class PdfExporter(BaseExporter):
             "</table>"
         )
 
-    def _module_log_html(
-        self, runs: list[dict], findings_by_module: dict[str, list]
-    ) -> str:
+    def _module_log_html(self, runs: list[dict[str, Any]], findings_by_module: dict[str, list]) -> str:
         if not runs:
             return '<p class="empty">No modules ran.</p>'
 
         row_html = ""
-        for r in runs:
-            mod = r.get("module_name", "unknown")
-            status = r.get("status", "unknown")
+        for run in runs:
+            module_name = run.get("module_name", "unknown")
+            status = run.get("status", "unknown")
             status_class = _STATUS_CLASS.get(status, "status-unknown")
-            err = r.get("error") or "—"
-            count = len(findings_by_module.get(mod, []))
-            duration = r.get("duration_ms")
-            dur_str = f"{duration}&nbsp;ms" if duration is not None else "—"
+            error = run.get("error") or "-"
+            count = len(findings_by_module.get(module_name, []))
+            duration = run.get("duration_ms")
+            duration_text = f"{duration}&nbsp;ms" if duration is not None else "-"
             row_html += (
                 f"<tr>"
-                f"<td>{_e(mod)}</td>"
+                f"<td>{_e(module_name)}</td>"
                 f'<td><span class="status-badge {status_class}">{_e(status)}</span></td>'
                 f'<td style="text-align:center">{_e(count)}</td>'
-                f'<td style="text-align:right">{dur_str}</td>'
-                f"<td>{_e(err)}</td>"
+                f'<td style="text-align:right">{duration_text}</td>'
+                f"<td>{_e(error)}</td>"
                 f"</tr>"
             )
 
@@ -274,8 +302,6 @@ class PdfExporter(BaseExporter):
             "</table>"
         )
 
-    # ── CSS ─────────────────────────────────────────────────────────────────
-
     def _css(self) -> str:
         return """
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -290,7 +316,7 @@ class PdfExporter(BaseExporter):
     color: #4a5568;
   }
   @bottom-left {
-    content: "MailAccess — Confidential";
+    content: "MailAccess - Confidential";
     font-family: system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
     font-size: 8pt;
     color: #4a5568;
@@ -305,7 +331,6 @@ body {
   line-height: 1.55;
 }
 
-/* ── Page header ── */
 .page-header {
   display: flex;
   justify-content: space-between;
@@ -332,7 +357,6 @@ body {
 }
 .header-email { color: #e2e8f0; font-weight: 600; font-size: 9pt; }
 
-/* ── Executive summary ── */
 .summary-card {
   background: #1a1d27;
   border: 1px solid #2d3748;
@@ -372,6 +396,21 @@ body {
 .risk-critical { background: #7f1d1d; color: #ef4444; }
 .risk-unknown  { background: #1f2937; color: #6b7280; }
 
+.credential-row {
+  margin-bottom: 10px;
+}
+
+.credential-pill {
+  display: inline-block;
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 8pt;
+  color: #cbd5e1;
+}
+.credential-pill strong { color: #f8fafc; }
+
 .stat-pills { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .pill {
@@ -389,7 +428,6 @@ body {
   margin-top: 8px;
 }
 
-/* ── Section headings ── */
 h2 {
   font-size: 12pt;
   color: #22d3ee;
@@ -400,7 +438,6 @@ h2 {
   letter-spacing: 0.3px;
 }
 
-/* ── Module sections ── */
 .module-section { margin-bottom: 18px; }
 
 .module-header {
@@ -430,7 +467,6 @@ h2 {
 .status-skipped { background: #1f2937; color: #6b7280; }
 .status-unknown { background: #1f2937; color: #6b7280; }
 
-/* ── Finding cards ── */
 .finding-card {
   background: #1a1d27;
   border: 1px solid #2d3748;
@@ -475,7 +511,6 @@ h2 {
   word-break: break-all;
 }
 
-/* ── Metadata table inside finding card ── */
 .meta-table {
   width: 100%;
   border-collapse: collapse;
@@ -491,7 +526,6 @@ h2 {
 .meta-key { color: #718096; white-space: nowrap; width: 35%; }
 .meta-val { color: #e2e8f0; }
 
-/* ── Full-width tables (metadata + log) ── */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -515,8 +549,16 @@ td {
   vertical-align: top;
 }
 
-tr:nth-child(odd)  td { background: #0f1117; }
+tr:nth-child(odd) td { background: #0f1117; }
 tr:nth-child(even) td { background: #141720; }
+
+ul {
+  margin: 0 0 14px 18px;
+}
+
+li {
+  margin-bottom: 4px;
+}
 
 .empty {
   color: #4a5568;

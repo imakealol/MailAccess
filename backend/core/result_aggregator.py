@@ -43,7 +43,7 @@ class ProfileAggregator:
     )
 
     # Platforms whose findings are breach-event records, not account-presence signals
-    _BREACH_EVENT_PLATFORMS = frozenset({"HaveIBeenPwned"})
+    _BREACH_EVENT_PLATFORMS = frozenset({"HaveIBeenPwned", "XposedOrNot"})
 
     def merge(self, findings: list[dict]) -> UnifiedProfile:
         """Extract and deduplicate identity fields from a list of findings."""

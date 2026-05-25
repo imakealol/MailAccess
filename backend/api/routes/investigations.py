@@ -43,6 +43,7 @@ class InvestigationSummary(BaseModel):
     email: str
     status: str
     exposure_score: int | None
+    credential_risk_score: int | None
     created_at: str
     completed_at: str | None
 
@@ -156,6 +157,7 @@ async def list_investigations(
                 email=item["email"],
                 status=item["status"],
                 exposure_score=item.get("exposure_score"),
+                credential_risk_score=item.get("credential_risk_score"),
                 created_at=item["created_at"],
                 completed_at=item.get("completed_at"),
             )

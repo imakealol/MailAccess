@@ -46,6 +46,7 @@ class Investigation(Base):
         DateTime(timezone=True), nullable=True
     )
     exposure_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    credential_risk_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     graph_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     module_runs: Mapped[list[ModuleRun]] = relationship(

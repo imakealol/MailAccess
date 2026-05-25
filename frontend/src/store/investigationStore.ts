@@ -28,6 +28,10 @@ interface Store {
   status: InvStatus
   exposureScore: number | null
   riskLevel: RiskLevel
+  credentialRiskScore: number | null
+  credentialRiskBand: string
+  scoreDrivers: string[]
+  recommendedActions: string[]
   modules: Record<string, ModuleState>
   totalFindings: number
   breachCount: number
@@ -37,7 +41,12 @@ interface Store {
   handleWsModuleStart: (module: string) => void
   handleWsModuleResult: (module: string, findings: Record<string, unknown>[], status: string) => void
   handleWsModuleError: (module: string, error: string) => void
-  handleWsComplete: (score: number | null, riskLevel: string) => void
+  handleWsComplete: (
+    score: number | null,
+    riskLevel: string,
+    credentialRiskScore: number | null,
+    credentialRiskBand: string
+  ) => void
   setStatus: (status: InvStatus) => void
   reset: () => void
 }
@@ -48,6 +57,10 @@ export const useInvestigationStore = create<Store>((set) => ({
   status: 'idle',
   exposureScore: null,
   riskLevel: 'unknown',
+  credentialRiskScore: null,
+  credentialRiskBand: 'UNKNOWN',
+  scoreDrivers: [],
+  recommendedActions: [],
   modules: blankModules(),
   totalFindings: 0,
   breachCount: 0,
@@ -59,6 +72,10 @@ export const useInvestigationStore = create<Store>((set) => ({
       status: 'running',
       exposureScore: null,
       riskLevel: 'unknown',
+      credentialRiskScore: null,
+      credentialRiskBand: 'UNKNOWN',
+      scoreDrivers: [],
+      recommendedActions: [],
       modules: blankModules(),
       totalFindings: 0,
       breachCount: 0,
@@ -101,6 +118,10 @@ export const useInvestigationStore = create<Store>((set) => ({
       status: invStatus,
       exposureScore: (report.exposure_score as number | null) ?? null,
       riskLevel: ((report.risk_level as string) || 'unknown') as RiskLevel,
+      credentialRiskScore: (report.credential_risk_score as number | null) ?? null,
+      credentialRiskBand: (report.credential_risk_band as string) || 'UNKNOWN',
+      scoreDrivers: ((report.score_drivers as string[] | undefined) ?? []).map(String),
+      recommendedActions: ((report.recommended_actions as string[] | undefined) ?? []).map(String),
       modules,
       totalFindings: findings.length,
       breachCount: findings.filter(f => f.module_name === 'hibp').length,
@@ -148,8 +169,14 @@ export const useInvestigationStore = create<Store>((set) => ({
     }))
   },
 
-  handleWsComplete(score, riskLevel) {
-    set({ status: 'complete', exposureScore: score, riskLevel: riskLevel as RiskLevel })
+  handleWsComplete(score, riskLevel, credentialRiskScore, credentialRiskBand) {
+    set({
+      status: 'complete',
+      exposureScore: score,
+      riskLevel: riskLevel as RiskLevel,
+      credentialRiskScore,
+      credentialRiskBand,
+    })
   },
 
   setStatus(status) {
@@ -163,6 +190,10 @@ export const useInvestigationStore = create<Store>((set) => ({
       status: 'idle',
       exposureScore: null,
       riskLevel: 'unknown',
+      credentialRiskScore: null,
+      credentialRiskBand: 'UNKNOWN',
+      scoreDrivers: [],
+      recommendedActions: [],
       modules: blankModules(),
       totalFindings: 0,
       breachCount: 0,

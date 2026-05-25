@@ -72,7 +72,7 @@ class GitHubCommitsModule(BaseModule):
             return ModuleResult(status=ModuleStatus.PARTIAL, errors=["GitHub request timed out"])
         except (httpx.ConnectError, httpx.NetworkError) as exc:
             # True connection-level failure — network unreachable / DNS failure
-            return ModuleResult(status=ModuleStatus.FAILED, errors=[f"GitHub unreachable: {exc}"])
+            return ModuleResult(status=ModuleStatus.PARTIAL, errors=[f"GitHub unreachable: {exc}"])
         except Exception as exc:
             # Unexpected error; degrade to PARTIAL rather than FAILED
             return ModuleResult(status=ModuleStatus.PARTIAL, errors=[f"GitHub unexpected error: {exc}"])
@@ -318,3 +318,4 @@ class GitHubCommitsModule(BaseModule):
                 "avatar_url": user.get("avatar_url"),
             },
         }
+

@@ -97,6 +97,8 @@ Every setting is optional unless marked required.
 
 MailAccess fetches the HIBP breach corpus on startup and caches it at `data/cache/breach_corpus.json` for 24h. No API key required for this fetch.
 
+v0.5.0 adds XposedOrNot and credential risk scoring without introducing any new environment variables.
+
 ### Rate Limiting
 
 | Variable | Default | Description |

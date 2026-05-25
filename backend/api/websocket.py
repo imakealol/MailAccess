@@ -5,25 +5,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..core.credential_risk import credential_risk_band
 from ..core.engine import QueueEvent
 from ..db.database import AsyncSessionLocal
 from ..db.models import Investigation
 from . import queue_registry
 
 router = APIRouter()
-
-
-def _risk_level(score: int | None) -> str:
-    if score is None:
-        return "unknown"
-    if score <= 15:
-        return "low"
-    if score <= 35:
-        return "medium"
-    if score <= 65:
-        return "high"
-    return "critical"
-
 
 @router.websocket("/ws/investigate/{investigation_id}")
 async def ws_investigate(investigation_id: str, websocket: WebSocket) -> None:
@@ -40,7 +28,13 @@ async def ws_investigate(investigation_id: str, websocket: WebSocket) -> None:
         { "type": "module_start",  "module": "hibp", "timestamp": "..." }
         { "type": "module_result", "module": "hibp", "findings": [...], "status": "success" }
         { "type": "module_error",  "module": "social", "error": "...", "status": "failed" }
-        { "type": "investigation_complete", "exposure_score": 72, "risk_level": "high" }
+        {
+          "type": "investigation_complete",
+          "exposure_score": 72,
+          "risk_level": "high",
+          "credential_risk_score": 81,
+          "credential_risk_band": "CRITICAL"
+        }
     """
     await websocket.accept()
 
@@ -69,11 +63,16 @@ async def ws_investigate(investigation_id: str, websocket: WebSocket) -> None:
                 async with AsyncSessionLocal() as db:
                     inv = await db.get(Investigation, investigation_id)
                 score = inv.exposure_score if inv else None
+                credential_score = inv.credential_risk_score if inv else None
                 await websocket.send_json(
                     {
                         "type": "investigation_complete",
                         "exposure_score": score,
-                        "risk_level": _risk_level(score),
+                        "risk_level": "unknown" if score is None else (
+                            "low" if score <= 20 else "medium" if score <= 50 else "high" if score <= 80 else "critical"
+                        ),
+                        "credential_risk_score": credential_score,
+                        "credential_risk_band": credential_risk_band(credential_score),
                     }
                 )
                 # Give the client 5 s to drain the frame before we close.

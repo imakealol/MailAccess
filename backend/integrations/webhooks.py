@@ -19,7 +19,12 @@ class WebhookDispatcher:
         self.discord_url = settings.discord_webhook_url
 
     async def dispatch(
-        self, email: str, score: int, collected: dict[str, ModuleResult]
+        self,
+        email: str,
+        score: int,
+        credential_risk_score: int,
+        credential_risk_band: str,
+        collected: dict[str, ModuleResult],
     ) -> None:
         if not self.slack_url and not self.discord_url:
             return
@@ -36,7 +41,14 @@ class WebhookDispatcher:
             if res.status in (ModuleStatus.SUCCESS, ModuleStatus.PARTIAL):
                 if name in _BREACH_MODULES:
                     for finding in res.findings:
-                        breach_name = finding.get("Name", finding.get("name", finding.get("title", "Unknown Breach")))
+                        breach_name = (
+                            finding.get("breach_name")
+                            or finding.get("Name")
+                            or finding.get("name")
+                            or finding.get("title")
+                            or finding.get("metadata", {}).get("breach_name")
+                            or "Unknown Breach"
+                        )
                         breach_findings.append(breach_name)
                 else:
                     accounts_found += len(res.findings)
@@ -66,6 +78,8 @@ class WebhookDispatcher:
                         client,
                         email,
                         score,
+                        credential_risk_score,
+                        credential_risk_band,
                         risk_level,
                         accounts_found,
                         breaches_found,
@@ -80,6 +94,8 @@ class WebhookDispatcher:
                         client,
                         email,
                         score,
+                        credential_risk_score,
+                        credential_risk_band,
                         risk_level,
                         accounts_found,
                         breaches_found,
@@ -101,6 +117,8 @@ class WebhookDispatcher:
         client: httpx.AsyncClient,
         email: str,
         score: int,
+        credential_risk_score: int,
+        credential_risk_band: str,
         risk_level: str,
         accounts_found: int,
         breaches_found: int,
@@ -129,6 +147,14 @@ class WebhookDispatcher:
                 "fields": [
                     {"type": "mrkdwn", "text": f"*Exposure Score:*\n{score}/100"},
                     {"type": "mrkdwn", "text": f"*Risk Level:*\n{risk_level}"},
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Credential Risk:*\n{credential_risk_score}/100",
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Credential Band:*\n{credential_risk_band}",
+                    },
                     {"type": "mrkdwn", "text": f"*Accounts Found:*\n{accounts_found}"},
                     {"type": "mrkdwn", "text": f"*Breaches Found:*\n{breaches_found}"},
                 ],
@@ -163,6 +189,8 @@ class WebhookDispatcher:
         client: httpx.AsyncClient,
         email: str,
         score: int,
+        credential_risk_score: int,
+        credential_risk_band: str,
         risk_level: str,
         accounts_found: int,
         breaches_found: int,
@@ -173,7 +201,11 @@ class WebhookDispatcher:
     ) -> None:
         embed = {
             "title": f"MailAccess — {email}",
-            "description": f"**Exposure Score:** {score}/100\n**Risk Level:** {risk_level}",
+            "description": (
+                f"**Exposure Score:** {score}/100\n"
+                f"**Risk Level:** {risk_level}\n"
+                f"**Credential Risk:** {credential_risk_score}/100 ({credential_risk_band})"
+            ),
             "color": color,
             "timestamp": timestamp_iso,
             "footer": {"text": "MailAccess OSINT Tool"},

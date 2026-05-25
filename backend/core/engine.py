@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -8,12 +9,14 @@ from sqlalchemy import update
 
 from ..db.database import AsyncSessionLocal
 from ..db.models import Finding, Investigation, InvestigationStatus, ModuleRun
+from .breach_normalizer import collapse_breach_findings
+from .credential_risk import assess_credential_risk_from_results
 from ..modules import get_all_modules
 from ..modules.base import ModuleResult, ModuleStatus
 
 # Module categories for exposure scoring
 _INFOSTEALER_MODULES = frozenset({"hudson_rock"})
-_BREACH_MODULES = frozenset({"hibp", "breachdirectory", "breach_deep"})
+_BREACH_MODULES = frozenset({"hibp", "breachdirectory", "breach_deep", "xposedornot"})
 _SOCIAL_MODULES = frozenset({
     "gravatar",
     "social_links",
@@ -61,10 +64,12 @@ _MODULE_CAP: dict[str, int] = {
     "breach_deep":      50,
     "hibp":             45,
     "breachdirectory":  40,
+    "xposedornot":      45,
 }
 
 _MODULE_DEFAULT_TIMEOUTS: dict[str, int] = {
     "breach_deep": 90,
+    "github_commits": 45,
 }
 
 
@@ -245,7 +250,10 @@ class InvestigationEngine:
             }
 
             from unittest.mock import patch
-            with patch.multiple(_cfg, **override_flags):
+            import contextlib
+            with contextlib.ExitStack() as stack:
+                if override_flags:
+                    stack.enter_context(patch.multiple(_cfg, **override_flags))
                 await asyncio.gather(
                     *[_run_one(cls) for cls in classes],
                     return_exceptions=True,
@@ -425,6 +433,7 @@ class InvestigationEngine:
                         if hasattr(_res, "findings"):
                             for _f in _res.findings:
                                 _findings_flat.append({"module_name": _mod, "data": _f})
+                    _findings_flat = collapse_breach_findings(_findings_flat)
                     graph_data = IdentityGraph.build(
                         {"email": email, "findings": _findings_flat}
                     ).to_d3()
@@ -438,7 +447,47 @@ class InvestigationEngine:
                 # `collected` in _run_and_persist — assigning to `collected` here
                 # would make Python treat it as a local throughout the function,
                 # causing UnboundLocalError on every earlier reference.
-                _final = _sort_collected(collected)
+                _final: dict[str, ModuleResult] = {
+                    name: ModuleResult(
+                        status=result.status,
+                        findings=list(result.findings),
+                        metadata=deepcopy(result.metadata) if result.metadata else {},
+                        errors=list(result.errors) if result.errors else [],
+                    )
+                    for name, result in collected.items()
+                }
+                _flat_findings: list[dict] = []
+                for _mod, _res in _final.items():
+                    if hasattr(_res, "findings"):
+                        for _f in _res.findings:
+                            _flat_findings.append({"module_name": _mod, "data": _f})
+
+                _collapsed = collapse_breach_findings(_flat_findings)
+                _final = {
+                    name: ModuleResult(
+                        status=result.status,
+                        findings=[],
+                        metadata=deepcopy(result.metadata) if result.metadata else {},
+                        errors=list(result.errors) if result.errors else [],
+                    )
+                    for name, result in _final.items()
+                }
+                for _finding in _collapsed:
+                    _module = str(_finding.get("module_name") or "").strip()
+                    if not _module:
+                        continue
+                    if _module not in _final:
+                        _final[_module] = ModuleResult(
+                            status=ModuleStatus.SUCCESS,
+                            findings=[],
+                            metadata={},
+                            errors=[],
+                        )
+                    _payload = _finding.get("data") if isinstance(_finding.get("data"), dict) else _finding
+                    if isinstance(_payload, dict):
+                        _final[_module].findings.append(_payload)
+
+                _final = _sort_collected(_final)
 
                 # Persist before sentinel so consumers see the final score in the DB.
                 self.status = InvestigationStatus.COMPLETE
@@ -449,7 +498,14 @@ class InvestigationEngine:
                     try:
                         from ..integrations.webhooks import WebhookDispatcher
                         score = _compute_exposure_score(_final)
-                        await WebhookDispatcher().dispatch(email, score, _final)
+                        credential_risk = assess_credential_risk_from_results(_final)
+                        await WebhookDispatcher().dispatch(
+                            email,
+                            score,
+                            credential_risk.score,
+                            credential_risk.band,
+                            _final,
+                        )
 
                         from ..config import settings
                         if settings.integration_webhook_url:
@@ -499,6 +555,7 @@ class InvestigationEngine:
     ) -> None:
         now = datetime.now(timezone.utc)
         score = _compute_exposure_score(collected)
+        credential_risk = assess_credential_risk_from_results(collected, as_of=now)
 
         async with AsyncSessionLocal() as session:
             async with session.begin():
@@ -506,6 +563,7 @@ class InvestigationEngine:
                     "status": InvestigationStatus.COMPLETE,
                     "completed_at": now,
                     "exposure_score": score,
+                    "credential_risk_score": credential_risk.score,
                 }
                 if graph_data is not None:
                     values["graph_data"] = graph_data

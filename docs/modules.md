@@ -1,8 +1,162 @@
 # Module Reference
 
-MailAccess ships 24 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
+MailAccess ships 28 modules covering 800+ platforms. Modules are auto-discovered from `backend/modules/` at startup. Each module runs concurrently with all others, subject to `MAX_CONCURRENT_MODULES` and `MODULE_TIMEOUT_SECONDS`.
 
 A module marked **key required** skips itself with `status: skipped` when its API key is absent — it does not cause the investigation to fail.
+
+---
+
+## `xposedornot`
+
+Query XposedOrNot's public breach corpus for direct email-to-breach associations.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Default** | On |
+| **Rate limit** | 1 request / second |
+| **Status** | Implemented |
+
+This module is free and does not require any API key. It calls both public XposedOrNot endpoints:
+- `GET /v1/check-email/{email}` for the direct breach association lookup
+- `GET /v1/breach-analytics?email={email}` for per-breach metadata and risk context
+
+It returns one finding per breach with canonical breach name, exposed data classes, and risk indicators. Findings are normalized later with other breach sources, so the same breach from XposedOrNot and HIBP becomes a single canonical finding with `sources` attribution.
+
+**Finding shape:**
+```json
+{
+  "platform": "XposedOrNot",
+  "source": "xposedornot",
+  "confidence": "high",
+  "severity": "critical",
+  "metadata": {
+    "breach_name": "SweClockers",
+    "breach_id": "SweClockers",
+    "domain": "sweclockers.com",
+    "breached_date": "2015-01-01",
+    "industry": "Electronics",
+    "exposed_records": 254967,
+    "data_classes": ["Email addresses", "Usernames", "Passwords"],
+    "risk": "critical",
+    "risk_indicators": {
+      "password_risk": "hardtocrack",
+      "searchable": true,
+      "verified": true,
+      "sensitive": false
+    },
+    "direct_match": true,
+    "source_module": "xposedornot"
+  }
+}
+```
+
+**Module metadata:**
+```json
+{
+  "breaches_found": 2,
+  "direct_breaches": ["SweClockers", "Tesco"],
+  "analytics_breaches": ["SweClockers", "Tesco"],
+  "all_data_classes": ["Email addresses", "Passwords", "Usernames"],
+  "risk_label": "Low",
+  "risk_score": 3,
+  "yearwise_details": {
+    "y2015": 1,
+    "y2020": 0
+  },
+  "direct_response": {},
+  "analytics_response": {}
+}
+```
+
+Rate-limit responses return `status: partial` with a retry hint.
+
+---
+
+## `leakcheck`
+
+Query LeakCheck's public breach corpus for direct email-to-breach associations.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Default** | On |
+| **Rate limit** | 1 request / 2 seconds |
+| **Status** | Implemented |
+
+This module is free and does not require any API key. It calls the public LeakCheck endpoint:
+- `GET https://leakcheck.io/api/public?check={email}`
+
+It returns one finding per breach with the breach name. Findings are normalized later with other breach sources, so the same breach from LeakCheck, XposedOrNot and HIBP becomes a single canonical finding with `sources` attribution. Regional breach lists that XposedOrNot misses are still surfaced here, and generic source labels are routed to the stealer signal path instead of the breach count.
+
+**Finding shape:**
+```json
+{
+  "platform": "000webhost",
+  "source": "leakcheck",
+  "confidence": "high",
+  "severity": "medium",
+  "breach_name": "000webhost",
+  "metadata": {
+    "breach_name": "000webhost",
+    "source_module": "leakcheck"
+  }
+}
+```
+
+**Module metadata:**
+```json
+{
+  "email": "test@example.com",
+  "sources_found": 1,
+  "breach_names": ["000webhost"]
+}
+```
+
+Rate-limit responses return `status: partial` with a clear message.
+
+---
+
+## `ransomware_intel`
+
+Check whether the email domain appears in ransomware victim lists.
+
+| | |
+|--|--|
+| **Requires key** | No |
+| **Default** | On |
+| **Scope** | Domain-level signal |
+| **Status** | Implemented |
+
+This module is free, requires no API key, and skips free email providers. It correlates the target domain against ransomware victim lists sourced from `ransomware.live` and `ransomlook.io`.
+
+**Finding shape:**
+```json
+{
+  "platform": "RansomwareIntel",
+  "source": "ransomware_intel",
+  "signal_type": "ransomware_victim_domain",
+  "confidence": "medium",
+  "severity": "high",
+  "metadata": {
+    "domain": "example.com",
+    "group_name": "Example Gang",
+    "attack_date": "2025-01-01",
+    "note": "Domain-level victim signal"
+  }
+}
+```
+
+**Module metadata:**
+```json
+{
+  "domain_checked": "example.com",
+  "victim_found": true,
+  "ransomware_group": "Example Gang",
+  "attack_date": "2025-01-01",
+  "is_free_provider": false
+}
+```
 
 ---
 

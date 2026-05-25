@@ -15,7 +15,13 @@ _PHOTO_KEYS = frozenset({
     "profile_photo",
     "image_url",
 })
-_BREACH_MODULES = frozenset({"hibp", "breachdirectory", "haveibeenpwned", "breach_deep"})
+_BREACH_MODULES = frozenset({
+    "hibp",
+    "breachdirectory",
+    "haveibeenpwned",
+    "breach_deep",
+    "xposedornot",
+})
 
 
 def _node_id(node_type: str, value: str) -> str:

@@ -9,6 +9,8 @@ from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..db.models import Finding, Investigation, InvestigationStatus, ModuleRun
+from .breach_normalizer import collapse_breach_findings
+from .credential_risk import assess_credential_risk_from_report, credential_risk_band
 from .engine import InvestigationEngine
 
 
@@ -38,6 +40,10 @@ def _build_summary(data: dict) -> str:
 def enrich_report(data: dict) -> dict:
     score = data.get("exposure_score")
     data["risk_level"] = _risk_level(score)
+    data.pop("credential_risk", None)
+
+    findings = collapse_breach_findings(data.get("findings", []))
+    data["findings"] = findings
     data["summary"] = _build_summary(data)
 
     data["metadata_table"] = {
@@ -46,9 +52,21 @@ def enrich_report(data: dict) -> dict:
     }
 
     findings_by_module: dict[str, list] = {}
-    for f in data.get("findings", []):
+    for f in findings:
         findings_by_module.setdefault(f["module_name"], []).append(f["data"])
     data["findings_by_module"] = findings_by_module
+
+    credential_assessment = assess_credential_risk_from_report(data)
+    stored_credential_score = data.get("credential_risk_score")
+    credential_score = (
+        stored_credential_score
+        if isinstance(stored_credential_score, int)
+        else credential_assessment.score
+    )
+    data["credential_risk_score"] = credential_score
+    data["credential_risk_band"] = credential_risk_band(credential_score)
+    data["score_drivers"] = credential_assessment.score_drivers
+    data["recommended_actions"] = credential_assessment.recommended_actions
 
     return data
 
@@ -143,6 +161,7 @@ class InvestigationService:
             "email": inv.email,
             "status": inv.status.value,
             "exposure_score": inv.exposure_score,
+            "credential_risk_score": inv.credential_risk_score,
             "graph_data": inv.graph_data,
             "created_at": inv.created_at.isoformat(),
             "completed_at": inv.completed_at.isoformat() if inv.completed_at else None,
@@ -201,6 +220,7 @@ class InvestigationService:
                     "email": inv.email,
                     "status": inv.status.value,
                     "exposure_score": inv.exposure_score,
+                    "credential_risk_score": inv.credential_risk_score,
                     "created_at": inv.created_at.isoformat(),
                     "completed_at": (
                         inv.completed_at.isoformat() if inv.completed_at else None

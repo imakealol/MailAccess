@@ -14,6 +14,7 @@ export interface InvestigationSummary {
   email: string
   status: string
   exposure_score: number | null
+  credential_risk_score: number | null
   created_at: string
   completed_at: string | null
 }
@@ -31,5 +32,11 @@ export type WsEvent =
   | { type: 'module_start'; module: string; timestamp: string }
   | { type: 'module_result'; module: string; findings: Record<string, unknown>[]; status: string }
   | { type: 'module_error'; module: string; error: string; status: string }
-  | { type: 'investigation_complete'; exposure_score: number | null; risk_level: string }
+  | {
+      type: 'investigation_complete'
+      exposure_score: number | null
+      risk_level: string
+      credential_risk_score: number | null
+      credential_risk_band: string
+    }
   | { type: 'error'; error: string }

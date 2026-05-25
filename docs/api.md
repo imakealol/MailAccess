@@ -128,6 +128,8 @@ Paginated list of past investigations, newest first.
 
 Full investigation report with all module runs and findings.
 
+The response includes `exposure_score` plus the separate credential risk fields: `credential_risk_score`, `credential_risk_band`, `score_drivers`, and `recommended_actions`.
+
 > **Known issue:** The route handler for this endpoint is currently missing in `backend/api/routes/investigations.py` — the response code at lines 80–83 is present but the `@router.get` decorator and function signature are absent, making the endpoint unreachable. Use `GET /api/report/{id}/export?format=json` as a workaround until the route is added.
 
 **Intended response `200`**
@@ -138,6 +140,18 @@ Full investigation report with all module runs and findings.
   "status": "complete",
   "exposure_score": 72,
   "risk_level": "high",
+  "credential_risk_score": 84,
+  "credential_risk_band": "CRITICAL",
+  "score_drivers": [
+    "infostealer hit",
+    "multiple high-severity breach findings",
+    "reused credentials across sources"
+  ],
+  "recommended_actions": [
+    "Reset affected passwords immediately and revoke active sessions",
+    "Review MFA enrollment and strengthen account recovery settings",
+    "Prioritize containment and analyst follow-up for exposed credentials"
+  ],
   "summary": "Ran 8 modules (7 successful, 1 failed). Found 14 data points.",
   "created_at": "2026-05-19T12:00:00+00:00",
   "completed_at": "2026-05-19T12:00:15+00:00",
