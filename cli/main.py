@@ -1235,19 +1235,19 @@ async def _investigate(
         async def render_clusters_output() -> None:
             discovered_emails = _get_discovered_emails(report_data)
             try:
-                resp = await client.get(f"/api/report/{inv_id}/clusters", timeout=10)
+                resp = await client.get(f"/api/report/{inv_id}/clusters", timeout=30)
                 resp.raise_for_status()
                 data = resp.json()
                 clusters = data.get("clusters", [])
                 if not clusters and not discovered_emails:
                     return
-            except Exception as e:
-                if not discovered_emails:
-                    out.print(f"[red]Error rendering clusters:[/] {e}")
-                    import traceback
-                    out.print(f"[dim]{traceback.format_exc()}[/dim]")
-                    return
-                clusters = []
+            except httpx.TimeoutException:
+                out.print(
+                    f"[dim]Identity analysis unavailable (large investigation — view at /investigation/{inv_id}/graph)[/dim]"
+                )
+                return
+            except Exception:
+                return
                 
             out.print(Rule("IDENTITY ANALYSIS", style="bold blue"))
             out.print()

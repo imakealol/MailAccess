@@ -72,6 +72,26 @@ _MODULE_DEFAULT_TIMEOUTS: dict[str, int] = {
     "github_commits": 45,
 }
 
+_MODULE_TIMEOUT_FLOORS: dict[str, int] = {
+    "account_discovery": 120,
+    "username_pivot": 60,
+    "user_scanner": 180,
+    "whatsmyname": 200,
+}
+
+
+def _resolve_module_timeout(
+    module_name: str,
+    default_timeout: int,
+    overrides: dict[str, int],
+) -> int:
+    floor_timeout = _MODULE_TIMEOUT_FLOORS.get(module_name, 0)
+    resolved_timeout = max(default_timeout, floor_timeout)
+    override_timeout = overrides.get(module_name)
+    if override_timeout is None:
+        return resolved_timeout
+    return max(resolved_timeout, override_timeout)
+
 
 def _module_weight(module_name: str) -> int:
     if module_name in _MODULE_WEIGHT_OVERRIDES:
@@ -203,7 +223,11 @@ class InvestigationEngine:
             default_timeout = _MODULE_DEFAULT_TIMEOUTS.get(
                 mod.name, settings.module_timeout_seconds
             )
-            timeout = settings.module_timeout_overrides.get(mod.name, default_timeout)
+            timeout = _resolve_module_timeout(
+                mod.name,
+                default_timeout,
+                settings.module_timeout_overrides,
+            )
             explicit_module = module_names is not None and mod.name in module_names
             async with semaphore:
                 await queue.put(QueueEvent(type="module_start", module_name=mod.name))
@@ -265,8 +289,10 @@ class InvestigationEngine:
                     from ..modules.username_pivot import UsernamePivotModule
 
                     _pivot = UsernamePivotModule()
-                    _pivot_timeout = _cfg.module_timeout_overrides.get(
-                        _pivot.name, _cfg.module_timeout_seconds
+                    _pivot_timeout = _resolve_module_timeout(
+                        _pivot.name,
+                        _cfg.module_timeout_seconds,
+                        _cfg.module_timeout_overrides,
                     )
                     await queue.put(QueueEvent(type="module_start", module_name=_pivot.name))
                     try:
@@ -320,14 +346,16 @@ class InvestigationEngine:
                     from ..modules.email_discovery import EmailDiscoveryModule
 
                     _email_discovery = EmailDiscoveryModule()
-                    _email_timeout = _cfg.module_timeout_overrides.get(
-                        _email_discovery.name, _cfg.module_timeout_seconds
+                    _email_timeout = _resolve_module_timeout(
+                        _email_discovery.name,
+                        _cfg.module_timeout_seconds,
+                        _cfg.module_timeout_overrides,
                     )
                     await queue.put(
                         QueueEvent(
                             type="module_start", module_name=_email_discovery.name
                         )
-                        )
+                    )
                     try:
                         _email_result = await asyncio.wait_for(
                             _email_discovery.run(email, _primary_collected),
@@ -361,8 +389,10 @@ class InvestigationEngine:
                     from ..modules.phone_intel import PhoneIntelModule
 
                     _phone = PhoneIntelModule()
-                    _phone_timeout = _cfg.module_timeout_overrides.get(
-                        _phone.name, _cfg.module_timeout_seconds
+                    _phone_timeout = _resolve_module_timeout(
+                        _phone.name,
+                        _cfg.module_timeout_seconds,
+                        _cfg.module_timeout_overrides,
                     )
                     await queue.put(QueueEvent(type="module_start", module_name=_phone.name))
                     try:

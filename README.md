@@ -240,6 +240,14 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 
 ## Changelog
 
+### 0.5.3
+- Cluster identity analysis no longer shows raw traceback
+  on timeout — shows dim fallback message instead
+- Hardcoded minimum timeout floors for pip-installed users:
+  account_discovery 120s, username_pivot 60s,
+  user_scanner 180s, whatsmyname 200s
+- .env overrides still win if set higher
+
 ### 0.5.2
 - Config resilience: CORS_ORIGINS and dict fields now
   accept plain strings, comma-separated values, and
