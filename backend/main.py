@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from rich.console import Console
 
 from .api.router import api_router, ws_router
 from .api.middleware.auth import APIKeyMiddleware, RequestIDMiddleware, request_id_contextvar
@@ -20,6 +21,7 @@ from .db.database import init_db
 from .integrations.maltego_transform import generate_mtz_bundle
 
 _MTZ_PATH = Path(__file__).parent.parent / "maltego" / "MailAccess.mtz"
+_startup_console = Console()
 
 logger = logging.getLogger("mailaccess.http")
 
@@ -31,14 +33,19 @@ async def lifespan(_app: FastAPI):
         format="%(levelname)s [%(request_id)s] %(name)s: %(message)s",
     )
     old_factory = logging.getLogRecordFactory()
-    
+
     def record_factory(*args, **kwargs):
         record = old_factory(*args, **kwargs)
         record.request_id = request_id_contextvar.get()
         return record
-        
+
     logging.setLogRecordFactory(record_factory)
-    
+
+    _startup_console.print(
+        f"[dim]Config loaded — CORS: {len(settings.cors_origins)} origins, "
+        f"{len(settings.module_timeout_overrides)} timeout overrides[/dim]"
+    )
+
     await init_db()
     generate_mtz_bundle(_MTZ_PATH)
     async def _warm_breach_corpus() -> None:
@@ -64,7 +71,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="MailAccess",
     description="OSINT email intelligence API",
-    version="0.5.1",
+    version="0.5.2",
     lifespan=lifespan,
     debug=settings.debug,
 )

@@ -1,12 +1,120 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+from typing import Any
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 _DEFAULT_DB = Path.home() / ".mailaccess" / "mailaccess.db"
+_DEFAULT_CORS_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+
+logger = logging.getLogger(__name__)
+
+
+def _coerce_cors_origins(value: Any) -> list[str]:
+    if value is None:
+        return list(_DEFAULT_CORS_ORIGINS)
+
+    items: list[Any]
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return list(_DEFAULT_CORS_ORIGINS)
+        if raw.startswith("["):
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON for CORS_ORIGINS; falling back to comma parsing")
+            else:
+                if isinstance(parsed, list):
+                    items = parsed
+                    origins = [str(item).strip() for item in items if str(item).strip()]
+                    return origins or list(_DEFAULT_CORS_ORIGINS)
+                logger.warning("CORS_ORIGINS JSON value is not a list; falling back to comma parsing")
+        items = raw.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        logger.warning("Unsupported CORS_ORIGINS value type %s; using defaults", type(value).__name__)
+        return list(_DEFAULT_CORS_ORIGINS)
+
+    origins = [str(item).strip() for item in items if str(item).strip()]
+    return origins or list(_DEFAULT_CORS_ORIGINS)
+
+
+def _coerce_mapping(
+    value: Any,
+    field_name: str,
+    value_type: type[int] | type[float],
+) -> dict[str, Any]:
+    if value is None:
+        return {}
+
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Invalid JSON for %s; using empty mapping", field_name)
+            return {}
+        if not isinstance(parsed, dict):
+            logger.warning("%s JSON value is not an object; using empty mapping", field_name)
+            return {}
+        value = parsed
+    elif not isinstance(value, dict):
+        logger.warning("Unsupported %s value type %s; using empty mapping", field_name, type(value).__name__)
+        return {}
+
+    parsed_mapping: dict[str, Any] = {}
+    for key, raw_item in value.items():
+        key_name = str(key).strip()
+        if not key_name:
+            continue
+        try:
+            converted = int(raw_item) if value_type is int else float(raw_item)
+        except (TypeError, ValueError):
+            logger.warning("Skipping invalid %s entry for %s: %r", field_name, key_name, raw_item)
+            continue
+        parsed_mapping[key_name] = converted
+    return parsed_mapping
+
+
+class _MailAccessSettingsSourceMixin:
+    def prepare_field_value(
+        self,
+        field_name: str,
+        field: Any,
+        value: Any,
+        value_is_complex: bool,
+    ) -> Any:
+        if field_name == "cors_origins":
+            return _coerce_cors_origins(value)
+        if field_name == "module_timeout_overrides":
+            return _coerce_mapping(value, field_name, int)
+        if field_name == "rate_limit_overrides":
+            return _coerce_mapping(value, field_name, int)
+        if field_name == "rate_limit_delays":
+            return _coerce_mapping(value, field_name, float)
+        return super().prepare_field_value(field_name, field, value, value_is_complex)
+
+
+class _MailAccessEnvSettingsSource(_MailAccessSettingsSourceMixin, EnvSettingsSource):
+    pass
+
+
+class _MailAccessDotEnvSettingsSource(_MailAccessSettingsSourceMixin, DotEnvSettingsSource):
+    pass
 
 
 class Settings(BaseSettings):
@@ -100,33 +208,65 @@ class Settings(BaseSettings):
     # Legacy per-domain delays (seconds): RATE_LIMIT_DELAYS={"haveibeenpwned.com": 1.5}
     rate_limit_delays: dict[str, float] = {}
 
-    @field_validator("rate_limit_overrides", mode="before")
+    @field_validator("cors_origins", mode="before")
     @classmethod
-    def _parse_overrides(cls, v: str | dict) -> dict[str, int]:
-        if isinstance(v, str):
-            return json.loads(v) if v else {}
-        return v
+    def _validate_cors_origins(cls, value: Any) -> list[str]:
+        return _coerce_cors_origins(value)
 
     @field_validator("module_timeout_overrides", mode="before")
     @classmethod
-    def _parse_timeout_overrides(cls, v: str | dict) -> dict[str, int]:
-        if isinstance(v, str):
-            return json.loads(v) if v else {}
-        return v
+    def _validate_module_timeout_overrides(cls, value: Any) -> dict[str, Any]:
+        return _coerce_mapping(value, "module_timeout_overrides", int)
+
+    @field_validator("rate_limit_overrides", mode="before")
+    @classmethod
+    def _validate_rate_limit_overrides(cls, value: Any) -> dict[str, Any]:
+        return _coerce_mapping(value, "rate_limit_overrides", int)
 
     @field_validator("rate_limit_delays", mode="before")
     @classmethod
-    def _parse_delays(cls, v: str | dict) -> dict[str, float]:
-        if isinstance(v, str):
-            return json.loads(v) if v else {}
-        return v
+    def _validate_rate_limit_delays(cls, value: Any) -> dict[str, Any]:
+        return _coerce_mapping(value, "rate_limit_delays", float)
 
-    @field_validator("cors_origins", mode="before")
     @classmethod
-    def _split_cors(cls, v: str | list[str]) -> list[str]:
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        config = settings_cls.model_config
+        source_kwargs = {
+            "case_sensitive": getattr(env_settings, "case_sensitive", config.get("case_sensitive")),
+            "env_prefix": getattr(env_settings, "env_prefix", config.get("env_prefix")),
+            "env_nested_delimiter": getattr(
+                env_settings, "env_nested_delimiter", config.get("env_nested_delimiter")
+            ),
+            "env_ignore_empty": getattr(
+                env_settings, "env_ignore_empty", config.get("env_ignore_empty")
+            ),
+            "env_parse_none_str": getattr(
+                env_settings, "env_parse_none_str", config.get("env_parse_none_str")
+            ),
+            "env_parse_enums": getattr(
+                env_settings, "env_parse_enums", config.get("env_parse_enums")
+            ),
+        }
+        dotenv_kwargs = {
+            **source_kwargs,
+            "env_file": getattr(dotenv_settings, "env_file", config.get("env_file")),
+            "env_file_encoding": getattr(
+                dotenv_settings, "env_file_encoding", config.get("env_file_encoding")
+            ),
+        }
+        return (
+            init_settings,
+            _MailAccessEnvSettingsSource(settings_cls, **source_kwargs),
+            _MailAccessDotEnvSettingsSource(settings_cls, **dotenv_kwargs),
+            file_secret_settings,
+        )
 
 
 settings = Settings()

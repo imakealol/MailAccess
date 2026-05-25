@@ -240,6 +240,13 @@ The `--output` / `-o` flag on `investigate` saves the report to a file. The exte
 
 ## Changelog
 
+### 0.5.2
+- Config resilience: CORS_ORIGINS and dict fields now
+  accept plain strings, comma-separated values, and
+  empty strings without crashing
+- No more SettingsError on first run with default .env
+- Startup confirmation line shows config parsed correctly
+
 ### 0.5.1
 
 - LeakCheck integration: free corpus lookup, covers CIS/regional breaches XposedOrNot misses
